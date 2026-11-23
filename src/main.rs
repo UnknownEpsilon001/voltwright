@@ -112,6 +112,8 @@ struct AppState {
     ac: Option<sim::AcResult>,
     shot: Option<(PathBuf, u32, bool, Arc<AtomicBool>)>,
     frames: u32,
+    /// Sideways scroll of the module tab strip, in points.
+    tab_scroll: f32,
     /// Simple snapshot undo/redo for schematic and PCB edits.
     undo: Vec<model::Project>,
     redo: Vec<model::Project>,
@@ -154,6 +156,7 @@ impl AppState {
             ac: None,
             shot: None,
             frames: 0,
+            tab_scroll: 0.0,
             undo: Vec::new(),
             redo: Vec::new(),
             edit_snapshot: None,
@@ -1215,8 +1218,8 @@ impl eframe::App for AppState {
             .frame(egui::Frame::NONE.fill(theme::CHROME))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("P").size(18.0).color(theme::WIRE).strong());
-                    ui.label(RichText::new("roteus Design Suite").strong());
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("Voltwright").size(15.0).color(theme::WIRE).strong());
                     ui.separator();
                     self.menu(ui);
                 });
@@ -1273,18 +1276,37 @@ impl eframe::App for AppState {
             .frame(egui::Frame::NONE.fill(theme::CHROME))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
-                    ScrollArea::horizontal().show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            for tab in Tab::ALL {
-                                if ui
-                                    .selectable_value(&mut self.tab, tab, tab.label())
-                                    .clicked()
-                                {
-                                    self.status = format!("Opened {}", tab.label());
+                    // The tab strip is wider than small windows. A floating
+                    // scrollbar would cover the labels, so hide it and let the
+                    // ordinary mouse wheel scroll the strip sideways.
+                    let strip = ScrollArea::horizontal()
+                        .id_salt("module_tabs")
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
+                        )
+                        .horizontal_scroll_offset(self.tab_scroll)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                for tab in Tab::ALL {
+                                    if ui
+                                        .selectable_value(&mut self.tab, tab, tab.label())
+                                        .clicked()
+                                    {
+                                        self.status = format!("Opened {}", tab.label());
+                                    }
                                 }
-                            }
+                            });
                         });
-                    });
+                    self.tab_scroll = strip.state.offset().x;
+                    if ui.rect_contains_pointer(strip.inner_rect) {
+                        let wheel = ui.input(|i| i.smooth_scroll_delta);
+                        let step = if wheel.x != 0.0 { wheel.x } else { wheel.y };
+                        let max = (strip.content_size.x - strip.inner_rect.width()).max(0.0);
+                        self.tab_scroll = (self.tab_scroll - step).clamp(0.0, max);
+                        if step != 0.0 {
+                            ui.ctx().request_repaint();
+                        }
+                    }
                     ui.separator();
 
                     match self.tab {
