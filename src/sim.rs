@@ -248,7 +248,20 @@ impl Simulator {
                 _ => 0.0,
             };
             if def.sim == SimKind::OpAmp {
-                pins.resize(5, 0);
+                // Solver order is [+, -, OUT]; parts list their pins in
+                // different orders, so look the roles up by name.
+                let by_name = |names: &[&str]| {
+                    def.pins
+                        .iter()
+                        .position(|p| names.iter().any(|n| p.name.eq_ignore_ascii_case(n)))
+                        .map(node)
+                        .unwrap_or(0)
+                };
+                pins = vec![
+                    by_name(&["+", "IN+", "IN1+"]),
+                    by_name(&["-", "IN-", "IN1-"]),
+                    by_name(&["OUT", "OUT1"]),
+                ];
             }
             els.push(El {
                 refdes: c.refdes.clone(),
@@ -882,7 +895,7 @@ fn solve(sim: &mut Simulator, dt: Option<f64>, t: f64) -> Result<(Vec<f64>, Vec<
                 }
                 Kind::OpAmp => {
                     let b = br.unwrap();
-                    let out = e.a();
+                    let out = e.pins.get(2).copied().unwrap_or(0);
                     let uo = unknown(out);
                     stamp_branch_nodes(&mut m, uo, None, b, nn);
                     if let Some(o) = uo {
@@ -1245,7 +1258,7 @@ pub fn ac_sweep(sim: &mut Simulator, f1: f64, f2: f64, decades: usize) -> Result
                 }
                 Kind::OpAmp => {
                     let b = br.unwrap();
-                    let uo = unknown(e.a());
+                    let uo = unknown(e.pins.get(2).copied().unwrap_or(0));
                     stamp_cbranch(&mut m, uo, None, b, nn);
                     if let Some(o) = uo {
                         m.add(nn + b, o, C64::of(1.0));

@@ -18,6 +18,11 @@ It is early work. Expect rough edges and file-format changes.
 - PCB layout with design-rule checks.
 - Exports: bill of materials, Gerber and pick-and-place files.
 - Undo and redo, property assignment and search tools.
+- Built-in example circuits (Examples menu): LED, voltage divider,
+  transistor switch, RC charging, op-amp amplifier and diode rectifier.
+- Import of `.pdsprj` projects. Voltwright brings across the parts it has
+  models for, rebuilds the nets and reroutes the wires; it lists anything it
+  had to skip.
 
 ## Build
 

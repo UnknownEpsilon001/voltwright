@@ -1,6 +1,7 @@
 // LEO WAS HERE ;3
 mod bom;
 mod dialogs;
+mod examples;
 mod io;
 mod ui_text;
 mod model;
@@ -545,6 +546,18 @@ impl AppState {
             ui.separator();
             if ui.button(ui_text::FILE_EXIT).clicked() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        });
+        ui.menu_button("Examples", |ui| {
+            for name in examples::names() {
+                if ui.button(name).clicked() {
+                    if let Some(p) = examples::build(name, &self.lib) {
+                        self.proj = p;
+                        self.reset_after_document_change();
+                        self.set_tab(Tab::Schematic);
+                        self.status = format!("Opened example '{name}'. Press Run to simulate.");
+                    }
+                }
             }
         });
         ui.menu_button("Edit", |ui| {
@@ -1372,7 +1385,10 @@ impl eframe::App for AppState {
         }
         if let Some(msg) = self.dialogs.show(&ctx, &mut self.proj, &self.lib) {
             self.status = msg.clone();
-            if msg.starts_with("Created project") || msg.starts_with("Opened project") {
+            if msg.starts_with("Created project")
+                || msg.starts_with("Opened project")
+                || msg.starts_with("Imported")
+            {
                 self.reset_after_document_change();
                 self.dialogs.save_path =
                     io::default_path(&self.proj).to_string_lossy().into_owned();

@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::model::{Library, Project, Wire, P};
+use crate::model::{Library, Project, P};
 use crate::schematic::Schematic;
 
 /// Source files store positions in 1/2540 of a thou.
@@ -618,46 +618,10 @@ pub fn import(path: &Path, lib: &Library) -> Result<(Project, String), String> {
         }
     }
 
-    // Wire each net as a chain, nearest pin next.
-    let mut wired = 0;
     let mut roots: Vec<_> = nets.keys().copied().collect();
     roots.sort_unstable();
-    for root in roots {
-        let mut pins = nets[&root].clone();
-        pins.dedup();
-        if pins.len() < 2 {
-            continue;
-        }
-        let pos = |p: &(u64, usize), proj: &Project| proj.pin_pos(lib, p.0, p.1);
-        let mut chain = vec![pins.remove(0)];
-        while !pins.is_empty() {
-            let Some(last) = pos(chain.last().unwrap(), &proj) else { break };
-            let (i, _) = pins
-                .iter()
-                .enumerate()
-                .filter_map(|(i, p)| pos(p, &proj).map(|q| (i, q.dist(last))))
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .unwrap_or((0, 0.0));
-            chain.push(pins.remove(i));
-        }
-        for pair in chain.windows(2) {
-            let (Some(a), Some(b)) = (pos(&pair[0], &proj), pos(&pair[1], &proj)) else {
-                continue;
-            };
-            let horizontal = proj.pin_is_horizontal(lib, pair[0].0, pair[0].1);
-            let route = Schematic::route_anchored(&proj, lib, &[a, b], horizontal);
-            if route.len() >= 2 {
-                let id = proj.alloc_id();
-                proj.wires.push(Wire {
-                    id,
-                    pts: route,
-                    start_pin: Some(pair[0]),
-                    end_pin: Some(pair[1]),
-                });
-                wired += 1;
-            }
-        }
-    }
+    let groups: Vec<_> = roots.into_iter().map(|r| nets[&r].clone()).collect();
+    let wired = Schematic::wire_nets(&mut proj, lib, &groups);
 
     proj.dirty = true;
     let mut report = format!(
