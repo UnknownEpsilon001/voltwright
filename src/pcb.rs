@@ -462,21 +462,30 @@ impl Pcb {
         let scr = |p: P| v.to_screen(p);
 
         // grid
-        let spacing = proj.grid.dot_spacing(v.zoom);
-        if proj.grid.show_dots && spacing >= 6.0 {
+        // dot_spacing() returns screen pixels. Stepping by it in world units
+        // made a zoomed-out board allocate millions of shapes per frame and
+        // freeze the UI. Convert to world units and cap the count, as the
+        // schematic view already does.
+        let spacing_px = proj.grid.dot_spacing(v.zoom);
+        if proj.grid.show_dots && spacing_px >= 6.0 {
+            let world_step = spacing_px / v.zoom;
             let tl = v.to_world(rect.left_top());
             let br = v.to_world(rect.right_bottom());
-            let mut shapes = Vec::new();
-            let mut x = (tl.x / spacing).floor() * spacing;
-            while x <= br.x {
-                let mut y = (tl.y / spacing).floor() * spacing;
-                while y <= br.y {
-                    shapes.push(Shape::circle_filled(scr(P::new(x, y)), 1.0, GRID_DOT));
-                    y += spacing;
+            let cols = ((br.x - tl.x) / world_step).ceil() as usize;
+            let rows = ((br.y - tl.y) / world_step).ceil() as usize;
+            if cols > 0 && rows > 0 && cols.saturating_mul(rows) <= 14000 {
+                let mut shapes: Vec<Shape> = Vec::with_capacity(cols * rows);
+                let mut x = (tl.x / world_step).floor() * world_step;
+                while x <= br.x {
+                    let mut y = (tl.y / world_step).floor() * world_step;
+                    while y <= br.y {
+                        shapes.push(Shape::circle_filled(scr(P::new(x, y)), 1.0, GRID_DOT));
+                        y += world_step;
+                    }
+                    x += world_step;
                 }
-                x += spacing;
+                painter.add(Shape::Vec(shapes));
             }
-            painter.add(Shape::Vec(shapes));
         }
 
         // board outline

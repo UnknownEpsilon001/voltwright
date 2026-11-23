@@ -3912,6 +3912,7 @@ dependencies = [
  "eframe",
  "egui",
  "image",
+ "miniz_oxide 0.8.9",
 ]
 
 [[package]]

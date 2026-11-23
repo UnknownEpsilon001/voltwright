@@ -9,6 +9,7 @@ license = "MIT"
 eframe = "0.37"
 egui = "0.37"
 image = "0.25"
+miniz_oxide = "0.8"
 
 [profile.dev]
 opt-level = 1

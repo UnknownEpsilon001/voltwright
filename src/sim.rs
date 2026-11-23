@@ -266,7 +266,7 @@ impl Simulator {
             });
         }
 
-        // Rails nothing drives become ideal supplies (Pristine/pwrrails.ini).
+        // Rails nothing drives become ideal supplies at their default voltage.
         for i in 0..nl.names.len() {
             let name = nl.names[i].clone();
             let rail = match name.to_uppercase().as_str() {

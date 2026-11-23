@@ -477,11 +477,28 @@ impl Dialogs {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         if ui.button("Open").clicked() {
-                            match crate::io::open(std::path::Path::new(&self.open_path)) {
-                                Ok(p) => {
-                                    result = Some(format!("Opened project '{}'", p.name));
+                            let path = std::path::PathBuf::from(self.open_path.trim());
+                            let foreign = path
+                                .extension()
+                                .is_some_and(|e| e.eq_ignore_ascii_case("pdsprj"));
+                            let opened = if foreign {
+                                crate::pdsprj::import(&path, lib)
+                            } else {
+                                crate::io::open(&path).map(|p| {
+                                    let msg = format!("Opened project '{}'", p.name);
+                                    (p, msg)
+                                })
+                            };
+                            match opened {
+                                Ok((p, msg)) => {
+                                    result = Some(msg);
                                     *proj = p;
-                                    self.save_path = self.open_path.clone();
+                                    // Imported files are saved as our own format.
+                                    self.save_path = if foreign {
+                                        path.with_extension("volt").to_string_lossy().into_owned()
+                                    } else {
+                                        self.open_path.clone()
+                                    };
                                     self.active = None;
                                 }
                                 Err(e) => self.message = format!("Open failed: {e}"),

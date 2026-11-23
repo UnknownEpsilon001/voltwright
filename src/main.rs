@@ -5,6 +5,7 @@ mod io;
 mod ui_text;
 mod model;
 mod panels;
+mod pdsprj;
 mod pcb;
 mod schematic;
 mod sim;
@@ -1123,9 +1124,10 @@ impl eframe::App for AppState {
 
         let frame_dt = ui.input(|i| i.unstable_dt as f64);
         if self.pump_simulation(frame_dt) {
-            // Paint at the display rate so current arrows move smoothly; the
-            // solver stays on its own 20 Hz worker thread.
-            ctx.request_repaint();
+            // Current arrows only need about 30 frames a second. An unbounded
+            // repaint request made egui redraw every grid dot and wire on every
+            // vsync while the solver ran, which starved input on slower PCs.
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
         }
 
         let typing = ctx.memory(|m| m.focused().is_some());

@@ -755,7 +755,7 @@ impl Schematic {
         Self::simplify_route(path)
     }
 
-    fn route_anchored(
+    pub(crate) fn route_anchored(
         proj: &Project,
         lib: &Library,
         points: &[P],
