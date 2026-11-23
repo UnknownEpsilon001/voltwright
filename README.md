@@ -1,0 +1,48 @@
+# Voltwright
+
+Voltwright is a desktop electronics suite written in Rust. You draw a schematic,
+run it live, and lay out the board in one window.
+
+It is early work. Expect rough edges and file-format changes.
+
+## Features
+
+- Schematic editor: place parts, wire pin to pin, and let the router find an
+  orthogonal path around component bodies. Wires follow parts when you move
+  them, and junction dots appear where three or more wire ends meet.
+- Live simulation: press Run and watch current arrows move along the wires.
+  The solver handles resistors, capacitors, inductors, sources, diodes, LEDs,
+  NPN/PNP transistors, op-amps, switches and lamps. Overloaded LEDs and
+  resistors burn out.
+- Analyses: transient and AC sweep.
+- PCB layout with design-rule checks.
+- Exports: bill of materials, Gerber and pick-and-place files.
+- Undo and redo, property assignment and search tools.
+
+## Build
+
+You need a recent stable Rust toolchain.
+
+```sh
+cargo run --release
+```
+
+Start with a running simulation:
+
+```sh
+cargo run --release -- --simulate
+```
+
+Run the tests:
+
+```sh
+cargo test
+```
+
+## Project files
+
+Voltwright saves projects as plain text with the `.volt` extension.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).

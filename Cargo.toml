@@ -1,0 +1,17 @@
+[package]
+name = "voltwright"
+version = "0.1.0"
+edition = "2021"
+description = "Open-source schematic capture, circuit simulation and PCB layout"
+license = "MIT"
+
+[dependencies]
+eframe = "0.37"
+egui = "0.37"
+image = "0.25"
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 2

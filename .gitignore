@@ -1,0 +1,7 @@
+/target
+/exports
+/shots
+*.volt
+
+# Local Claude instructions
+CLAUDE.md
