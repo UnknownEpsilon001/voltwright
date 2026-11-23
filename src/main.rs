@@ -12,6 +12,7 @@ mod pcb;
 mod schematic;
 mod sim;
 mod theme;
+mod toolicons;
 mod util;
 
 use std::collections::hash_map::DefaultHasher;
@@ -730,27 +731,23 @@ impl AppState {
                     if ui.button("P  Pick Devices").clicked() {
                         self.handle_editor_action(schematic::EditorAction::PickParts);
                     }
-                    if ui.button("W  Wire").clicked() {
-                        self.schematic.tool = schematic::Tool::Wire;
-                        self.status = "Wire tool: click a pin, then the target pin.".into();
-                    }
                     if ui.button("Undo").clicked() {
                         self.undo();
                     }
                     if ui.button("Redo").clicked() {
                         self.redo();
                     }
-                    for tool in [
-                        schematic::Tool::Select,
-                        schematic::Tool::Wire,
-                        schematic::Tool::Part,
-                        schematic::Tool::Label,
-                        schematic::Tool::Text,
-                        schematic::Tool::Probe,
-                        schematic::Tool::Delete,
+                    ui.separator();
+                    for (tool, icon, tip) in [
+                        (schematic::Tool::Select, toolicons::Icon::Select, "Select"),
+                        (schematic::Tool::Wire, toolicons::Icon::Wire, "Wire  (W)"),
+                        (schematic::Tool::Part, toolicons::Icon::Part, "Place Part"),
+                        (schematic::Tool::Label, toolicons::Icon::Label, "Net Label"),
+                        (schematic::Tool::Text, toolicons::Icon::Text, "Text"),
+                        (schematic::Tool::Probe, toolicons::Icon::Probe, "Voltage Probe"),
+                        (schematic::Tool::Delete, toolicons::Icon::Delete, "Delete"),
                     ] {
-                        if ui
-                            .selectable_value(&mut self.schematic.tool, tool, tool.label())
+                        if toolicons::mode_button(ui, &mut self.schematic.tool, tool, icon, tip)
                             .clicked()
                         {
                             self.status = format!("Tool: {}", tool.label());
@@ -763,14 +760,14 @@ impl AppState {
                     ui.add(egui::TextEdit::singleline(&mut self.probe_text).desired_width(70.0));
                 }
                 Tab::Pcb => {
-                    for tool in [
-                        pcb::PcbTool::Select,
-                        pcb::PcbTool::Track,
-                        pcb::PcbTool::Via,
-                        pcb::PcbTool::Board,
-                        pcb::PcbTool::Delete,
+                    for (tool, icon) in [
+                        (pcb::PcbTool::Select, toolicons::Icon::Select),
+                        (pcb::PcbTool::Track, toolicons::Icon::Track),
+                        (pcb::PcbTool::Via, toolicons::Icon::Via),
+                        (pcb::PcbTool::Board, toolicons::Icon::Board),
+                        (pcb::PcbTool::Delete, toolicons::Icon::Delete),
                     ] {
-                        ui.selectable_value(&mut self.pcb.tool, tool, tool.label());
+                        toolicons::mode_button(ui, &mut self.pcb.tool, tool, icon, tool.label());
                     }
                     ui.separator();
                     egui::ComboBox::from_label("Layer")
