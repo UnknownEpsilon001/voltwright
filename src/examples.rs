@@ -24,6 +24,9 @@ const fn part(id: &'static str, refdes: &'static str, value: &'static str, x: f3
     Part { id, refdes, value, at: (x, y), rot }
 }
 
+// Layouts are drawn on the pin positions of each part so that every
+// connection is a straight run or a single bend: vertical parts have pin 1 on
+// top and pin 2 below, horizontal parts have pin 1 on the left.
 const EXAMPLES: &[Example] = &[
     Example {
         name: "LED with current-limiting resistor",
@@ -38,7 +41,8 @@ const EXAMPLES: &[Example] = &[
         nets: &[
             &[("B1", 0), ("R1", 0)],
             &[("R1", 1), ("D1", 0)],
-            &[("D1", 1), ("B1", 1), ("GND1", 0)],
+            &[("D1", 1), ("B1", 1)],
+            &[("B1", 1), ("GND1", 0)],
         ],
     },
     Example {
@@ -46,15 +50,16 @@ const EXAMPLES: &[Example] = &[
         notes: "Two equal resistors split 12 V in half. Hover the middle wire, \
                 or add a voltage probe there, to read 6 V.",
         parts: &[
-            part("BATTERY", "B1", "12V", -250.0, 0.0, 90),
+            part("BATTERY", "B1", "12V", -250.0, 100.0, 90),
             part("RESISTOR", "R1", "10k", 50.0, -100.0, 90),
             part("RESISTOR", "R2", "10k", 50.0, 100.0, 90),
-            part("GND", "GND1", "0V", -250.0, 250.0, 0),
+            part("GND", "GND1", "0V", -250.0, 260.0, 0),
         ],
         nets: &[
             &[("B1", 0), ("R1", 0)],
             &[("R1", 1), ("R2", 0)],
-            &[("R2", 1), ("B1", 1), ("GND1", 0)],
+            &[("R2", 1), ("B1", 1)],
+            &[("B1", 1), ("GND1", 0)],
         ],
     },
     Example {
@@ -62,19 +67,21 @@ const EXAMPLES: &[Example] = &[
         notes: "Close SW1 to push current into the base of Q1. The transistor \
                 turns on and lights the lamp from the same 9 V supply.",
         parts: &[
-            part("BATTERY", "B1", "9V", -350.0, 50.0, 90),
-            part("SWITCH", "SW1", "SWITCH", -200.0, -150.0, 0),
-            part("RESISTOR", "R1", "1k", 0.0, 50.0, 0),
-            part("2N3904", "Q1", "2N3904", 200.0, 50.0, 0),
-            part("LAMP", "L1", "12V", 225.0, -150.0, 90),
-            part("GND", "GND1", "0V", -350.0, 250.0, 0),
+            part("BATTERY", "B1", "9V", -350.0, 100.0, 90),
+            part("SWITCH", "SW1", "SWITCH", -200.0, -100.0, 0),
+            part("RESISTOR", "R1", "1k", 0.0, -100.0, 0),
+            part("2N3904", "Q1", "2N3904", 150.0, 0.0, 0),
+            part("LAMP", "L1", "12V", 200.0, -200.0, 90),
+            part("GND", "GND1", "0V", -350.0, 300.0, 0),
         ],
         nets: &[
-            &[("B1", 0), ("SW1", 0), ("L1", 0)],
+            &[("B1", 0), ("SW1", 0)],
+            &[("B1", 0), ("L1", 0)],
             &[("SW1", 1), ("R1", 0)],
             &[("R1", 1), ("Q1", 0)],
             &[("L1", 1), ("Q1", 1)],
-            &[("Q1", 2), ("B1", 1), ("GND1", 0)],
+            &[("Q1", 2), ("B1", 1)],
+            &[("B1", 1), ("GND1", 0)],
         ],
     },
     Example {
@@ -82,40 +89,42 @@ const EXAMPLES: &[Example] = &[
         notes: "Close SW1 and watch C1 charge through R1. The time constant \
                 is R x C = 10k x 100u = 1 second.",
         parts: &[
-            part("BATTERY", "B1", "5V", -300.0, 0.0, 90),
-            part("SWITCH", "SW1", "SWITCH", -150.0, -150.0, 0),
-            part("RESISTOR", "R1", "10k", 50.0, -150.0, 0),
-            part("CAP", "C1", "100u", 200.0, 0.0, 90),
-            part("GND", "GND1", "0V", -300.0, 200.0, 0),
+            part("BATTERY", "B1", "5V", -300.0, 100.0, 90),
+            part("SWITCH", "SW1", "SWITCH", -150.0, -100.0, 0),
+            part("RESISTOR", "R1", "10k", 50.0, -100.0, 0),
+            part("CAP", "C1", "100u", 250.0, -40.0, 90),
+            part("GND", "GND1", "0V", -300.0, 300.0, 0),
         ],
         nets: &[
             &[("B1", 0), ("SW1", 0)],
             &[("SW1", 1), ("R1", 0)],
             &[("R1", 1), ("C1", 0)],
-            &[("C1", 1), ("B1", 1), ("GND1", 0)],
+            &[("C1", 1), ("B1", 1)],
+            &[("B1", 1), ("GND1", 0)],
         ],
     },
     Example {
         name: "Non-inverting op-amp amplifier",
         notes: "U1 amplifies the 1 V input by 1 + R2/R1 = 3, so the output sits \
-                at 3 V. The op-amp runs from the +5 V and -5 V rails.",
+                at 3 V. This is an ideal op-amp; its supply pins are not used \
+                by the simulation.",
         parts: &[
-            part("DCSRC", "V1", "1V", -350.0, 50.0, 90),
+            part("DCSRC", "V1", "1V", -300.0, 20.0, 90),
             part("OPAMP", "U1", "OPAMP", 0.0, 0.0, 0),
-            part("RESISTOR", "R1", "10k", -150.0, 200.0, 90),
-            part("RESISTOR", "R2", "20k", 50.0, 150.0, 0),
-            part("RESISTOR", "RL", "10k", 300.0, 100.0, 90),
-            part("VCC", "VCC1", "5V", 0.0, -200.0, 0),
-            part("VEE", "VEE1", "-5V", 100.0, 250.0, 0),
-            part("GND", "GND1", "0V", -350.0, 350.0, 0),
+            part("RESISTOR", "R1", "10k", -190.0, 100.0, 90),
+            part("RESISTOR", "R2", "20k", 200.0, 100.0, 90),
+            part("RESISTOR", "RL", "10k", 420.0, 60.0, 90),
+            part("GND", "GND1", "0V", -190.0, 260.0, 0),
         ],
         nets: &[
             &[("V1", 0), ("U1", 0)],
-            &[("U1", 1), ("R1", 0), ("R2", 0)],
-            &[("R2", 1), ("U1", 2), ("RL", 0)],
-            &[("U1", 3), ("VCC1", 0)],
-            &[("U1", 4), ("VEE1", 0)],
-            &[("V1", 1), ("R1", 1), ("RL", 1), ("GND1", 0)],
+            &[("U1", 1), ("R1", 0)],
+            &[("U1", 2), ("R2", 0)],
+            &[("R2", 0), ("RL", 0)],
+            &[("R2", 1), ("U1", 1)],
+            &[("R1", 1), ("GND1", 0)],
+            &[("V1", 1), ("GND1", 0)],
+            &[("RL", 1), ("GND1", 0)],
         ],
     },
     Example {
@@ -131,7 +140,8 @@ const EXAMPLES: &[Example] = &[
         nets: &[
             &[("V1", 0), ("D1", 0)],
             &[("D1", 1), ("RL", 0)],
-            &[("RL", 1), ("V1", 1), ("GND1", 0)],
+            &[("RL", 1), ("V1", 1)],
+            &[("V1", 1), ("GND1", 0)],
         ],
     },
 ];
@@ -159,6 +169,22 @@ pub fn build(name: &str, lib: &Library) -> Option<Project> {
             }
         }
         ids.push((p.refdes, id));
+    }
+    // Centre the circuit on the sheet (the sheet's origin is its top-left
+    // corner), on the 25-thou grid so pins stay aligned.
+    let (mut lo, mut hi) = (P::new(f32::MAX, f32::MAX), P::new(f32::MIN, f32::MIN));
+    for c in &proj.comps {
+        lo = P::new(lo.x.min(c.x), lo.y.min(c.y));
+        hi = P::new(hi.x.max(c.x), hi.y.max(c.y));
+    }
+    let snap = |v: f32| (v / 25.0).round() * 25.0;
+    let (dx, dy) = (
+        snap(crate::schematic::SHEET_W * 0.5 - (lo.x + hi.x) * 0.5),
+        snap(crate::schematic::SHEET_H * 0.5 - (lo.y + hi.y) * 0.5),
+    );
+    for c in &mut proj.comps {
+        c.x += dx;
+        c.y += dy;
     }
     let nets: Vec<Vec<(u64, usize)>> = ex
         .nets
@@ -189,6 +215,22 @@ mod tests {
             let mut sim = Simulator::from_project(&proj, &lib)
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
             sim.solve_dc().unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+    }
+
+    #[test]
+    fn examples_sit_inside_the_sheet() {
+        let lib = Library::builtin();
+        for name in names() {
+            let proj = build(name, &lib).unwrap();
+            for c in &proj.comps {
+                assert!(
+                    c.x > 100.0 && c.x < crate::schematic::SHEET_W - 100.0
+                        && c.y > 100.0 && c.y < crate::schematic::SHEET_H - 100.0,
+                    "{name}: {} is at ({}, {}), outside the sheet",
+                    c.refdes, c.x, c.y
+                );
+            }
         }
     }
 

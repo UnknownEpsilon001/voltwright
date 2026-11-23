@@ -412,6 +412,23 @@ impl Schematic {
                 .iter()
                 .map(|pd| c.pos().add(pd.pos.rot(c.rot)))
                 .collect();
+            // One-pin symbols hang off their pin: a ground symbol draws below
+            // it, a power rail above. Their obstacle covers only that side, so
+            // the pin itself stays reachable from every direction.
+            if pins.len() == 1 {
+                let body = match def.symbol {
+                    Symbol::Ground => Some((P::new(-34.0, 4.0), P::new(34.0, 46.0))),
+                    Symbol::Rail => Some((P::new(-14.0, -58.0), P::new(14.0, -4.0))),
+                    _ => None,
+                };
+                if let Some((lo, hi)) = body {
+                    let corners = [c.pos().add(lo.rot(c.rot)), c.pos().add(hi.rot(c.rot))];
+                    if let Some(r) = bbox_of(&corners, 0.0) {
+                        out.push(r);
+                    }
+                }
+                continue;
+            }
             let Some(base) = bbox_of(&pins, 0.0) else {
                 continue;
             };
@@ -498,6 +515,54 @@ impl Schematic {
         Some(p.add(step))
     }
 
+    fn point_on_segment(p: P, a: P, b: P) -> bool {
+        const EPS: f32 = 0.5;
+        if (a.y - b.y).abs() < EPS {
+            (p.y - a.y).abs() < EPS && p.x >= a.x.min(b.x) - EPS && p.x <= a.x.max(b.x) + EPS
+        } else if (a.x - b.x).abs() < EPS {
+            (p.x - a.x).abs() < EPS && p.y >= a.y.min(b.y) - EPS && p.y <= a.y.max(b.y) + EPS
+        } else {
+            false
+        }
+    }
+
+    /// Segments of every wire that is NOT electrically joined to a new wire
+    /// running from `a` to `b`. Wires of the same net may overlap freely, the
+    /// way several wires leaving one pin share their first stretch; only
+    /// other nets are worth avoiding. A wire joins a net when one of its ends
+    /// lies on a wire of that net, which is how junctions are made.
+    fn wire_segments_foreign(proj: &Project, skip: Option<u64>, a: P, b: P) -> Vec<(P, P)> {
+        let wires: Vec<&Wire> = proj.wires.iter().filter(|w| Some(w.id) != skip).collect();
+        let on_wire = |p: P, w: &Wire| {
+            w.pts.iter().any(|q| q.dist(p) < 0.5)
+                || w.pts.windows(2).any(|s| Self::point_on_segment(p, s[0], s[1]))
+        };
+        let ends = |w: &Wire| [w.pts.first().copied(), w.pts.last().copied()];
+        let joined = |x: &Wire, y: &Wire| {
+            ends(x).into_iter().flatten().any(|p| on_wire(p, y))
+                || ends(y).into_iter().flatten().any(|p| on_wire(p, x))
+        };
+        let mut member: Vec<bool> = wires.iter().map(|w| on_wire(a, w) || on_wire(b, w)).collect();
+        loop {
+            let mut changed = false;
+            for i in 0..wires.len() {
+                if !member[i] && (0..wires.len()).any(|j| member[j] && joined(wires[i], wires[j])) {
+                    member[i] = true;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        wires
+            .iter()
+            .zip(member)
+            .filter(|(_, m)| !m)
+            .flat_map(|(w, _)| w.pts.windows(2).map(|s| (s[0], s[1])).collect::<Vec<_>>())
+            .collect()
+    }
+
     fn wire_segments(proj: &Project, skip: Option<u64>) -> Vec<(P, P)> {
         proj.wires
             .iter()
@@ -581,7 +646,7 @@ impl Schematic {
             return vec![start];
         }
         let obstacles = Self::component_obstacles(proj, lib);
-        let wires = Self::wire_segments(proj, skip_wire);
+        let wires = Self::wire_segments_foreign(proj, skip_wire, start, end);
         let simple = Self::simplify_route(vec![
             start,
             if horizontal_first {
@@ -600,7 +665,18 @@ impl Schematic {
         let max_x = start.x.max(end.x) + pad;
         let min_y = start.y.min(end.y) - pad;
         let max_y = start.y.max(end.y) + pad;
-        let mut candidates = vec![simple];
+        // The other orientation of the L: it often clears an obstacle the
+        // preferred one hits (for example a pin facing away from its target).
+        let other = Self::simplify_route(vec![
+            start,
+            if horizontal_first {
+                P::new(start.x, end.y)
+            } else {
+                P::new(end.x, start.y)
+            },
+            end,
+        ]);
+        let mut candidates = vec![simple, other];
         for &y in &[min_y, max_y] {
             candidates.push(Self::simplify_route(vec![
                 start,
@@ -643,7 +719,7 @@ impl Schematic {
             return vec![start];
         }
         let obstacles = Self::component_obstacles(proj, lib);
-        let wires = Self::wire_segments(proj, skip_wire);
+        let wires = Self::wire_segments_foreign(proj, skip_wire, start, end);
         let mid = if horizontal_first {
             P::new(end.x, start.y)
         } else {
@@ -2826,6 +2902,24 @@ pub fn part_icon(ui: &mut egui::Ui, def: &crate::model::PartDef, lib: &Library) 
     response
 }
 
+/// How far from the centre, along the pin axis, each two-pin symbol's drawing
+/// begins on its left and right side. Pin leads run to exactly this distance so
+/// the symbol and its pins form one unbroken line.
+fn lead_reach(symbol: Symbol) -> Option<(f32, f32)> {
+    Some(match symbol {
+        Symbol::Resistor | Symbol::Pot | Symbol::Fuse => (38.0, 38.0),
+        Symbol::Capacitor => (8.0, 8.0),
+        Symbol::PolarCap => (8.0, 10.0),
+        Symbol::Inductor => (40.0, 40.0),
+        Symbol::Diode | Symbol::Led => (24.0, 18.0),
+        Symbol::Battery => (12.0, 12.0),
+        Symbol::Lamp | Symbol::Motor | Symbol::Speaker | Symbol::Source => (34.0, 34.0),
+        Symbol::Switch | Symbol::Button => (34.0, 34.0),
+        Symbol::Xtal => (16.0, 16.0),
+        _ => return None,
+    })
+}
+
 fn draw_component(
     p: &egui::Painter,
     v: &View,
@@ -2851,35 +2945,41 @@ fn draw_component(
 
     // Draw only the short inward pin connection. The old code extended every
     // pin away from the component, creating stray green lines on both sides.
+    let reach = if def.pins.len() == 2 { lead_reach(def.symbol) } else { None };
     for pd in &def.pins {
         if pd.pos.dist(P::ZERO) < 0.5 {
             continue;
         }
         let a = s(pd.pos);
-        let angle = (pd.dir as f32).to_radians();
-        let inward = P::new(-angle.cos() * 22.0, angle.sin() * 22.0);
-        let b = s(pd.pos.add(inward));
+        let b = match reach {
+            // Run the lead right up to the drawn body, whatever its size.
+            Some((left, right)) if pd.pos.y.abs() < 0.5 => {
+                let stop = if pd.pos.x < 0.0 { -left } else { right };
+                if (pd.pos.x - stop).abs() < 0.5 {
+                    continue;
+                }
+                s(P::new(stop, 0.0))
+            }
+            _ => {
+                let angle = (pd.dir as f32).to_radians();
+                let inward = P::new(-angle.cos() * 22.0, angle.sin() * 22.0);
+                s(pd.pos.add(inward))
+            }
+        };
         line(p, a, b, ink, thin);
     }
 
     match def.symbol {
         Symbol::Resistor | Symbol::Pot | Symbol::Fuse => {
-            let a = s(P::new(-38.0, 0.0));
-            let b = s(P::new(38.0, 0.0));
-            let r = Rect::from_two_pos(a, b);
-            let r =
-                Rect::from_center_size(r.center(), Vec2::new(r.width().max(6.0), 20.0 * v.zoom));
+            // The body is a rotated 76 x 20 rectangle, so it keeps its shape
+            // at any angle.
+            let corners: Vec<Pos2> = [(-38.0, -10.0), (38.0, -10.0), (38.0, 10.0), (-38.0, 10.0)]
+                .iter()
+                .map(|&(x, y)| s(P::new(x, y)))
+                .collect();
+            p.add(Shape::closed_line(corners, Stroke::new(thin, ink)));
             if def.symbol == Symbol::Fuse {
-                rect(p, r, None, ink, thin);
-                line(
-                    p,
-                    Pos2::new(r.left(), r.center().y),
-                    Pos2::new(r.right(), r.center().y),
-                    ink,
-                    thin,
-                );
-            } else {
-                rect(p, r, None, ink, thin);
+                line(p, s(P::new(-38.0, 0.0)), s(P::new(38.0, 0.0)), ink, thin);
             }
             if def.symbol == Symbol::Pot {
                 let t = s(P::new(0.0, -46.0));
@@ -3458,7 +3558,7 @@ fn draw_component(
         let top = def.pins.iter().map(|pd| pd.pos.y).fold(0.0f32, f32::min);
         let anchor = match def.symbol {
             Symbol::Ic => s(P::new(0.0, top - 38.0)),
-            Symbol::OpAmp => s(P::new(0.0, -96.0)),
+            Symbol::OpAmp => s(P::new(-50.0, -92.0)),
             _ => s(P::new(0.0, -66.0)),
         };
         p.text(
@@ -3837,17 +3937,18 @@ mod tests {
     }
 
     #[test]
-    fn router_detours_instead_of_drawing_over_an_existing_wire() {
+    fn router_detours_instead_of_drawing_over_another_nets_wire() {
         let lib = Library::builtin();
         let mut proj = Project::new("avoid overlap");
         proj.wires
             .push(wire(1001, vec![P::new(100.0, 300.0), P::new(500.0, 300.0)]));
 
+        // Neither end touches the existing wire, so it belongs to another net.
         let route = Schematic::route_with_options(
             &proj,
             &lib,
-            P::new(100.0, 300.0),
-            P::new(500.0, 300.0),
+            P::new(50.0, 300.0),
+            P::new(550.0, 300.0),
             true,
             None,
         );
@@ -3857,5 +3958,244 @@ mod tests {
         assert!(route
             .windows(2)
             .all(|seg| Schematic::overlap_length(seg[0], seg[1], &existing) < 0.5));
+    }
+
+    #[test]
+    fn wires_of_one_net_may_share_a_stretch() {
+        let lib = Library::builtin();
+        let mut proj = Project::new("same net");
+        // An existing wire leaves the pin at (100, 300) towards (500, 300).
+        proj.wires
+            .push(wire(1001, vec![P::new(100.0, 300.0), P::new(500.0, 300.0)]));
+
+        // A second wire from the same pin runs straight on past it.
+        let route = Schematic::route_with_options(
+            &proj,
+            &lib,
+            P::new(100.0, 300.0),
+            P::new(900.0, 300.0),
+            true,
+            None,
+        );
+        assert_eq!(route.len(), 2, "same-net overlap must not force a detour: {route:?}");
+
+        // A wire that ends on the middle of the first one is part of its net.
+        let route = Schematic::route_with_options(
+            &proj,
+            &lib,
+            P::new(300.0, 300.0),
+            P::new(700.0, 300.0),
+            true,
+            None,
+        );
+        assert_eq!(route.len(), 2, "{route:?}");
+    }
+
+    // ---- routing quality harness ------------------------------------
+
+    fn lcg(seed: &mut u64) -> u32 {
+        *seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (*seed >> 33) as u32
+    }
+
+    fn segments_touch(a: (P, P), b: (P, P)) -> bool {
+        // Axis-aligned segments: they touch when their bounding boxes overlap.
+        let (a0, a1, b0, b1) = (a.0, a.1, b.0, b.1);
+        a0.x.min(a1.x) <= b0.x.max(b1.x) + 0.5
+            && b0.x.min(b1.x) <= a0.x.max(a1.x) + 0.5
+            && a0.y.min(a1.y) <= b0.y.max(b1.y) + 0.5
+            && b0.y.min(b1.y) <= a0.y.max(a1.y) + 0.5
+    }
+
+    /// Everything wrong with one routed wire, as short labels.
+    fn route_defects(route: &[P], start: P, end: P, obstacles: &[Rect]) -> Vec<&'static str> {
+        let mut bad = Vec::new();
+        if route.len() < 2 || !near(route[0], start) || !near(*route.last().unwrap(), end) {
+            bad.push("endpoints");
+            return bad;
+        }
+        let segs: Vec<(P, P)> = route.windows(2).map(|w| (w[0], w[1])).collect();
+        if segs.iter().any(|(a, b)| (a.x - b.x).abs() > 0.5 && (a.y - b.y).abs() > 0.5) {
+            bad.push("diagonal");
+        }
+        if segs.iter().any(|(a, b)| a.dist(*b) < 0.5) {
+            bad.push("zero-length");
+        }
+        for t in route.windows(3) {
+            let (ab, bc) = (t[1].sub(t[0]), t[2].sub(t[1]));
+            if ab.x * bc.x + ab.y * bc.y < -0.5 && (ab.x * bc.y - ab.y * bc.x).abs() < 0.5 {
+                bad.push("reversal");
+            }
+        }
+        for i in 0..segs.len() {
+            for j in i + 2..segs.len() {
+                if segments_touch(segs[i], segs[j]) {
+                    bad.push("self-crossing");
+                }
+            }
+        }
+        let length: f32 = segs.iter().map(|(a, b)| a.dist(*b)).sum();
+        let manhattan = (start.x - end.x).abs() + (start.y - end.y).abs();
+        if length > manhattan + 100.0 {
+            bad.push("detour");
+        }
+        if route.len() > 6 {
+            bad.push("too-many-bends");
+        }
+        if segs.iter().any(|(a, b)| !Schematic::segments_clear(*a, *b, obstacles)) {
+            bad.push("through-part");
+        }
+        bad.sort();
+        bad.dedup();
+        bad
+    }
+
+    fn random_circuit(seed: u64, lib: &Library) -> (Project, Vec<Vec<(u64, usize)>>) {
+        let mut rng = seed;
+        let kinds = ["RESISTOR", "CAP", "BATTERY", "LED-RED", "2N3904", "SWITCH", "LAMP", "DIODE", "GND", "OPAMP", "INDUCTOR"];
+        let mut proj = Project::new("random");
+        let n = 5 + (lcg(&mut rng) % 4) as usize;
+        let mut ids = Vec::new();
+        for _ in 0..n {
+            let kind = kinds[(lcg(&mut rng) % kinds.len() as u32) as usize];
+            // Keep parts well apart: overlapping parts cannot be wired cleanly.
+            let mut at = P::new(0.0, 0.0);
+            for _ in 0..50 {
+                at = if seed % 3 == 0 {
+                    // Aligned layout: parts share rows and columns, which is
+                    // how people lay out real schematics.
+                    P::new(
+                        200.0 + (lcg(&mut rng) % 4) as f32 * 400.0,
+                        200.0 + (lcg(&mut rng) % 3) as f32 * 400.0,
+                    )
+                } else {
+                    P::new(
+                        200.0 + (lcg(&mut rng) % 48) as f32 * 25.0,
+                        200.0 + (lcg(&mut rng) % 32) as f32 * 25.0,
+                    )
+                };
+                if proj.comps.iter().all(|c| (c.x - at.x).abs() >= 350.0 || (c.y - at.y).abs() >= 350.0) {
+                    break;
+                }
+            }
+            if proj.comps.iter().any(|c| (c.x - at.x).abs() < 350.0 && (c.y - at.y).abs() < 350.0) {
+                continue;
+            }
+            if let Some(id) = proj.add_component(lib, kind, at) {
+                proj.comps.last_mut().unwrap().rot = [0, 90, 180, 270][(lcg(&mut rng) % 4) as usize];
+                ids.push(id);
+            }
+        }
+        // Free pins, then random nets of 2-4 pins from different parts.
+        let mut free: Vec<(u64, usize)> = ids
+            .iter()
+            .flat_map(|&id| {
+                let pins = lib.get(&proj.comp(id).unwrap().part).unwrap().pins.len();
+                (0..pins).map(move |i| (id, i))
+            })
+            .collect();
+        let mut nets = Vec::new();
+        while free.len() >= 2 && nets.len() < 6 {
+            let size = (2 + lcg(&mut rng) % 3) as usize;
+            let mut net: Vec<(u64, usize)> = Vec::new();
+            for _ in 0..size {
+                if free.is_empty() {
+                    break;
+                }
+                let k = (lcg(&mut rng) as usize) % free.len();
+                let pin = free.remove(k);
+                if net.iter().all(|q| q.0 != pin.0) {
+                    net.push(pin);
+                }
+            }
+            if net.len() >= 2 {
+                nets.push(net);
+            }
+        }
+        (proj, nets)
+    }
+
+    /// Wire each net as a star from its first pin, like drawing several wires
+    /// from one pin (a supply rail or ground) by hand.
+    fn wire_star(proj: &mut Project, lib: &Library, nets: &[Vec<(u64, usize)>]) {
+        for net in nets {
+            let first = net[0];
+            for other in &net[1..] {
+                let (Some(a), Some(b)) = (proj.pin_pos(lib, first.0, first.1), proj.pin_pos(lib, other.0, other.1)) else { continue };
+                let horizontal = proj.pin_is_horizontal(lib, first.0, first.1);
+                let route = Schematic::route_anchored(proj, lib, &[a, b], horizontal);
+                if route.len() >= 2 {
+                    let id = proj.alloc_id();
+                    proj.wires.push(Wire { id, pts: route, start_pin: Some(first), end_pin: Some(*other) });
+                }
+            }
+        }
+    }
+
+    /// Wire random circuits and report routing defects. The counts are
+    /// printed so progress is visible with `cargo test -- --nocapture`.
+    fn routing_report(circuits: u64) -> (usize, usize, std::collections::BTreeMap<&'static str, usize>, Vec<String>) {
+        let lib = Library::builtin();
+        let mut wires = 0;
+        let mut defective = 0;
+        let mut counts = std::collections::BTreeMap::new();
+        let mut examples = Vec::new();
+        for seed in 1..=circuits {
+            let (mut proj, nets) = random_circuit(seed, &lib);
+            if seed % 2 == 0 {
+                wire_star(&mut proj, &lib, &nets);
+            } else {
+                Schematic::wire_nets(&mut proj, &lib, &nets);
+            }
+            let obstacles = Schematic::component_obstacles(&proj, &lib);
+            for w in &proj.wires {
+                let (Some(a), Some(b)) = (w.start_pin, w.end_pin) else { continue };
+                let (Some(sp), Some(ep)) = (proj.pin_pos(&lib, a.0, a.1), proj.pin_pos(&lib, b.0, b.1)) else { continue };
+                wires += 1;
+                let bad = route_defects(&w.pts, sp, ep, &obstacles);
+                if !bad.is_empty() {
+                    defective += 1;
+                    for b in &bad {
+                        *counts.entry(*b).or_insert(0) += 1;
+                    }
+                    if examples.len() < 4 {
+                        examples.push(format!("seed {seed}: {bad:?} {:?}", w.pts.iter().map(|p| (p.x, p.y)).collect::<Vec<_>>()));
+                    }
+                }
+            }
+        }
+        (wires, defective, counts, examples)
+    }
+
+    #[test]
+    fn built_in_examples_are_routed_cleanly() {
+        let lib = Library::builtin();
+        for name in crate::examples::names() {
+            let proj = crate::examples::build(name, &lib).unwrap();
+            let obstacles = Schematic::component_obstacles(&proj, &lib);
+            for w in &proj.wires {
+                let (Some(a), Some(b)) = (w.start_pin, w.end_pin) else { continue };
+                let sp = proj.pin_pos(&lib, a.0, a.1).unwrap();
+                let ep = proj.pin_pos(&lib, b.0, b.1).unwrap();
+                let bad = route_defects(&w.pts, sp, ep, &obstacles);
+                assert!(bad.is_empty(), "{name}: {bad:?} {:?}", w.pts.iter().map(|p| (p.x, p.y)).collect::<Vec<_>>());
+            }
+        }
+    }
+
+    #[test]
+    fn routing_quality_report() {
+        let (wires, defective, counts, examples) = routing_report(900);
+        println!("ROUTING wires {wires} flagged {defective} {counts:?}");
+        for e in &examples {
+            println!("ROUTING e.g. {e}");
+        }
+        // A long way round is sometimes forced (two pins facing the same
+        // way), so detours are only reported. Everything else is a bug.
+        for kind in ["endpoints", "diagonal", "zero-length", "reversal", "self-crossing", "through-part"] {
+            assert_eq!(counts.get(kind).copied().unwrap_or(0), 0, "{kind}: {examples:?}");
+        }
     }
 }

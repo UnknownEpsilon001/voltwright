@@ -1759,6 +1759,12 @@ fn main() {
     let show_symbols = args.iter().position(|arg| arg == "--symbols").map(|i| {
         args.get(i + 1).filter(|a| !a.starts_with("--")).cloned().unwrap_or_default()
     });
+    // Developer aid: --example N opens the Nth built-in example.
+    let start_example = args
+        .iter()
+        .position(|arg| arg == "--example")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|n| n.parse::<usize>().ok());
     // Developer aid for screenshots: --tab source|pcb|simulation|home
     let start_tab = args
         .iter()
@@ -1834,6 +1840,11 @@ fn main() {
                 proj.dirty = false;
                 app.proj = proj;
                 app.reset_after_document_change();
+            }
+            if let Some(n) = start_example {
+                if let Some(name) = examples::names().nth(n) {
+                    app.open_example(name);
+                }
             }
             match start_tab.as_deref() {
                 Some("source") => app.tab = Tab::Source,
