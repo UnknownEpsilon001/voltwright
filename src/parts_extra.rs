@@ -6,9 +6,7 @@
 // sensors, displays and microcontrollers are pin-accurate blocks for
 // schematic capture and PCB layout; they are not simulated yet.
 
-use crate::model::{
-    named_dual_row_pins, named_part, two_pin, PartDef, PinDef, SimKind, Symbol, P,
-};
+use crate::model::{named_dual_row_pins, named_part, two_pin, PartDef, PinDef, SimKind, Symbol, P};
 
 /// Add a part. An older part with the same id is kept unless its pins are only
 /// numbered placeholders and the new part has the same pin count, in which
@@ -26,6 +24,21 @@ fn add(parts: &mut Vec<PartDef>, part: PartDef) {
     }
 }
 
+/// Smallest symbol half-width (in schematic units) that keeps the pin labels
+/// on the left and right sides from running into each other.
+fn fit_width(pins: &[&str]) -> f32 {
+    let n = pins.len();
+    let left = n.div_ceil(2);
+    let label = |i: usize| {
+        let num = (i + 1).to_string();
+        if pins[i] == num { num.len() } else { num.len() + 2 + pins[i].chars().count() }
+    };
+    let l = (0..left).map(label).max().unwrap_or(0) as f32;
+    let r = (left..n).map(label).max().unwrap_or(0) as f32;
+    let need = 18.0 + (50.0 + 10.7 * (l + r)) / 2.0;
+    ((need.max(120.0) / 5.0).ceil()) * 5.0
+}
+
 /// A chip drawn as a box with its pins on two sides.
 fn chip(
     parts: &mut Vec<PartDef>,
@@ -36,14 +49,15 @@ fn chip(
     prefix: &str,
     pins: &[&str],
 ) {
-    let width = if pins.len() > 24 { 175.0 } else { 120.0 };
+    let width = fit_width(pins).max(if pins.len() > 24 { 175.0 } else { 120.0 });
     add(
         parts,
         named_part(id, name, category, "DEVICE", package, id, prefix, named_dual_row_pins(pins, width)),
     );
 }
 
-/// A single-row part such as a header, sensor or regulator.
+/// A single-row package (header, sensor, regulator). The symbol splits the
+/// pins across both sides of the box so inputs and outputs read naturally.
 fn sil(
     parts: &mut Vec<PartDef>,
     id: &str,
@@ -53,17 +67,10 @@ fn sil(
     prefix: &str,
     pins: &[&str],
 ) {
-    let rows = pins.len();
-    let def: Vec<PinDef> = pins
-        .iter()
-        .enumerate()
-        .map(|(i, n)| PinDef {
-            name: (*n).into(),
-            pos: P::new(-120.0, -((rows as f32 - 1.0) * 50.0) * 0.5 + i as f32 * 50.0),
-            dir: 180,
-        })
-        .collect();
-    add(parts, named_part(id, name, category, "DEVICE", package, id, prefix, def));
+    add(
+        parts,
+        named_part(id, name, category, "DEVICE", package, id, prefix, named_dual_row_pins(pins, fit_width(pins))),
+    );
 }
 
 fn two(
@@ -91,10 +98,15 @@ fn transistor(
     names: [&str; 3],
 ) {
     let mut q = two_pin(id, name, "Transistors", "DEVICE", package, symbol, sim, id, "Q");
+    // PNP and P-channel parts draw the emitter/source on top, so swap the
+    // positions of the second and third pins; pin order stays the same.
+    let flip = matches!(symbol, Symbol::Pnp | Symbol::Pmos);
+    let (top, bottom) = (((50.0, -60.0), 90), ((50.0, 60.0), 270));
+    let (second, third) = if flip { (bottom, top) } else { (top, bottom) };
     q.pins = vec![
         PinDef { name: names[0].into(), pos: P::new(-90.0, 0.0), dir: 180 },
-        PinDef { name: names[1].into(), pos: P::new(50.0, -60.0), dir: 90 },
-        PinDef { name: names[2].into(), pos: P::new(50.0, 60.0), dir: 270 },
+        PinDef { name: names[1].into(), pos: P::new(second.0 .0, second.0 .1), dir: second.1 },
+        PinDef { name: names[2].into(), pos: P::new(third.0 .0, third.0 .1), dir: third.1 },
     ];
     add(parts, q);
 }
@@ -170,13 +182,13 @@ pub fn add_all(p: &mut Vec<PartDef>) {
         ("IRFZ44N", "N-CHANNEL MOSFET 55V 49A", "TO-220"),
         ("IRLZ44N", "LOGIC-LEVEL N-MOSFET 55V", "TO-220"),
     ] {
-        transistor(p, id, name, pkg, Symbol::Npn, SimKind::Npn, ["G", "D", "S"]);
+        transistor(p, id, name, pkg, Symbol::Nmos, SimKind::Npn, ["G", "D", "S"]);
     }
     for (id, name, pkg) in [
         ("IRF9540N", "P-CHANNEL MOSFET 100V 23A", "TO-220"),
         ("IRF4905", "P-CHANNEL MOSFET 55V 74A", "TO-220"),
     ] {
-        transistor(p, id, name, pkg, Symbol::Pnp, SimKind::Pnp, ["G", "D", "S"]);
+        transistor(p, id, name, pkg, Symbol::Pmos, SimKind::Pnp, ["G", "D", "S"]);
     }
 
     // ---- Dual op-amps (simulated) and other amplifiers ---------------
@@ -366,6 +378,23 @@ mod tests {
             assert!(has(&["+", "IN+", "IN1+"]), "{} lacks a + input", p.id);
             assert!(has(&["-", "IN-", "IN1-"]), "{} lacks a - input", p.id);
             assert!(has(&["OUT", "OUT1"]), "{} lacks an output", p.id);
+        }
+    }
+
+    #[test]
+    fn emitter_or_source_is_on_top_for_p_type_parts() {
+        use crate::model::Symbol;
+        let lib = Library::builtin();
+        for p in &lib.parts {
+            if !matches!(p.symbol, Symbol::Npn | Symbol::Pnp | Symbol::Nmos | Symbol::Pmos) || p.pins.len() != 3 {
+                continue;
+            }
+            let (c, e) = (p.pins[1].pos.y, p.pins[2].pos.y);
+            if matches!(p.symbol, Symbol::Pnp | Symbol::Pmos) {
+                assert!(e < c, "{}: P-type emitter/source belongs on top", p.id);
+            } else {
+                assert!(c < e, "{}: N-type collector/drain belongs on top", p.id);
+            }
         }
     }
 

@@ -174,6 +174,16 @@ impl AppState {
         self.tab = tab;
     }
 
+    /// Replace the current project with a built-in example circuit.
+    fn open_example(&mut self, name: &str) {
+        if let Some(p) = examples::build(name, &self.lib) {
+            self.proj = p;
+            self.reset_after_document_change();
+            self.set_tab(Tab::Schematic);
+            self.status = format!("Opened example '{name}'. Press Run to simulate.");
+        }
+    }
+
     fn reset_after_document_change(&mut self) {
         self.schematic.clear_selection();
         self.schematic.request_fit();
@@ -558,12 +568,8 @@ impl AppState {
         ui.menu_button("Examples", |ui| {
             for name in examples::names() {
                 if ui.button(name).clicked() {
-                    if let Some(p) = examples::build(name, &self.lib) {
-                        self.proj = p;
-                        self.reset_after_document_change();
-                        self.set_tab(Tab::Schematic);
-                        self.status = format!("Opened example '{name}'. Press Run to simulate.");
-                    }
+                    self.open_example(name);
+                    ui.close();
                 }
             }
         });
@@ -900,6 +906,23 @@ impl AppState {
                             }
                         }
                     });
+                    ui.add_space(16.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+                    ui.strong("Example circuits");
+                    ui.label("Click one to open it, then press Run Simulation.");
+                    ui.add_space(4.0);
+                    let mut chosen: Option<&'static str> = None;
+                    ui.horizontal_wrapped(|ui| {
+                        for name in examples::names() {
+                            if ui.button(name).clicked() {
+                                chosen = Some(name);
+                            }
+                        }
+                    });
+                    if let Some(name) = chosen {
+                        self.open_example(name);
+                    }
                     ui.add_space(16.0);
                     ui.separator();
                     ui.add_space(8.0);
@@ -1658,25 +1681,51 @@ fn demo_project(lib: &model::Library) -> model::Project {
     proj
 }
 
-/// Black-and-white window icon: a diode symbol (triangle and bar on a lead).
+/// Window icon: a white transistor symbol on a black background.
 fn app_icon() -> egui::IconData {
     const N: usize = 64;
-    let mut rgba = vec![0u8; N * N * 4];
-    let inside_triangle = |x: f32, y: f32| {
-        // Triangle pointing right: base at x = 14, tip at x = 40, y centred at 32.
-        let (x0, x1, cy, half) = (14.0, 40.0, 32.0, 17.0);
-        x >= x0 && x <= x1 && (y - cy).abs() <= half * (x1 - x) / (x1 - x0)
+    fn dist_to_segment(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let t = (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+        (p.0 - (a.0 + t * dx)).hypot(p.1 - (a.1 + t * dy))
+    }
+    fn in_triangle(p: (f32, f32), t: [(f32, f32); 3]) -> bool {
+        let side = |a: (f32, f32), b: (f32, f32)| (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0);
+        let (d1, d2, d3) = (side(t[0], t[1]), side(t[1], t[2]), side(t[2], t[0]));
+        !((d1 < 0.0 || d2 < 0.0 || d3 < 0.0) && (d1 > 0.0 || d2 > 0.0 || d3 > 0.0))
+    }
+    // Strokes: (from, to, half width). Base lead and plate, then collector
+    // and emitter, each bent and extended past the circle.
+    const STROKES: [((f32, f32), (f32, f32), f32); 6] = [
+        ((3.0, 32.0), (22.0, 32.0), 1.9),
+        ((22.0, 18.0), (22.0, 46.0), 2.6),
+        ((22.0, 26.0), (38.0, 14.0), 1.9),
+        ((38.0, 14.0), (38.0, 5.0), 1.9),
+        ((22.0, 38.0), (38.0, 50.0), 1.9),
+        ((38.0, 50.0), (38.0, 59.0), 1.9),
+    ];
+    const ARROW: [(f32, f32); 3] = [(35.6, 48.2), (25.7, 46.4), (31.1, 39.2)];
+    let ink = |x: f32, y: f32| -> bool {
+        let p = (x, y);
+        ((x - 36.0).hypot(y - 32.0) - 22.0).abs() <= 1.8
+            || STROKES.iter().any(|&(a, b, w)| dist_to_segment(p, a, b) <= w)
+            || in_triangle(p, ARROW)
     };
+    let mut rgba = vec![0u8; N * N * 4];
     for py in 0..N {
         for px in 0..N {
-            let (x, y) = (px as f32 + 0.5, py as f32 + 0.5);
-            let tri = inside_triangle(x, y);
-            let bar = (40.0..=46.0).contains(&x) && (14.0..=50.0).contains(&y);
-            let lead = (y - 32.0).abs() <= 2.5 && ((3.0..=14.0).contains(&x) || (46.0..=61.0).contains(&x));
-            let ink = tri || bar || lead;
-            let tile = if ink { [0u8, 0, 0, 255] } else { [255u8, 255, 255, 255] };
+            // 3x3 supersampling for smooth edges.
+            let mut hit = 0;
+            for sy in 0..3 {
+                for sx in 0..3 {
+                    if ink(px as f32 + (sx as f32 + 0.5) / 3.0, py as f32 + (sy as f32 + 0.5) / 3.0) {
+                        hit += 1;
+                    }
+                }
+            }
+            let v = (hit * 255 / 9) as u8;
             let at = (py * N + px) * 4;
-            rgba[at..at + 4].copy_from_slice(&tile);
+            rgba[at..at + 4].copy_from_slice(&[v, v, v, 255]);
         }
     }
     egui::IconData { rgba, width: N as u32, height: N as u32 }
@@ -1706,6 +1755,10 @@ fn main() {
     let mut shot: Option<PathBuf> = None;
     let args: Vec<String> = std::env::args().collect();
     let start_live = args.iter().any(|arg| arg == "--simulate");
+    // Developer aid: --symbols lays out one of each symbol for review.
+    let show_symbols = args.iter().position(|arg| arg == "--symbols").map(|i| {
+        args.get(i + 1).filter(|a| !a.starts_with("--")).cloned().unwrap_or_default()
+    });
     // Developer aid for screenshots: --tab source|pcb|simulation|home
     let start_tab = args
         .iter()
@@ -1752,6 +1805,36 @@ fn main() {
             if start_live {
                 app.start_simulation();
             }
+            if let Some(sheet) = &show_symbols {
+                let mut proj = model::Project::new("Symbol sheet");
+                let (ids, cols, dx, dy): (&[&str], usize, f32, f32) = if sheet == "ic" {
+                    (
+                        &["7812", "74LS74", "74LS00", "7SEG-CC", "ATTINY85", "555", "SERVO", "HC-SR04", "RELAY-SPDT", "CONN-SIL4", "LM35", "LM358"],
+                        4,
+                        380.0,
+                        330.0,
+                    )
+                } else {
+                    (
+                        &[
+                            "RESISTOR", "POT-HG", "CAP", "CPOL", "INDUCTOR", "FUSE", "DIODE", "ZENER",
+                            "1N5819", "LED-RED", "LED-BLUE", "2N3904", "2N3906", "2N7000", "IRF9540N",
+                            "OPAMP", "GND", "VCC", "SWITCH", "PUSH", "BATTERY", "LAMP", "SINE",
+                            "ISRC", "MOTOR", "BUZZER", "DCSRC", "PULSE",
+                        ],
+                        7,
+                        215.0,
+                        250.0,
+                    )
+                };
+                for (i, id) in ids.iter().enumerate() {
+                    let at = model::P::new(150.0 + (i % cols) as f32 * dx, 200.0 + (i / cols) as f32 * dy);
+                    proj.add_component(&app.lib, id, at);
+                }
+                proj.dirty = false;
+                app.proj = proj;
+                app.reset_after_document_change();
+            }
             match start_tab.as_deref() {
                 Some("source") => app.tab = Tab::Source,
                 Some("pcb") => app.tab = Tab::Pcb,
@@ -1788,6 +1871,19 @@ mod tests {
         let sim = app.sim.as_ref().expect("demo project should simulate");
         assert!(sim.t > stop);
         assert!(sim.running, "continuous Run must wait for the Stop command");
+    }
+
+    #[test]
+    fn icon_is_a_white_transistor_on_black() {
+        let icon = app_icon();
+        let px = |x: usize, y: usize| icon.rgba[(y * icon.width as usize + x) * 4];
+        assert_eq!(px(0, 0), 0, "background corner should be black");
+        assert_eq!(px(63, 63), 0);
+        assert_eq!(px(22, 32), 255, "base plate should be white");
+        assert!(icon.rgba.chunks(4).all(|c| c[0] == c[1] && c[1] == c[2] && c[3] == 255));
+        if let Ok(path) = std::env::var("VOLT_ICON_OUT") {
+            image::save_buffer(path, &icon.rgba, icon.width, icon.height, image::ColorType::Rgba8).unwrap();
+        }
     }
 
     #[test]

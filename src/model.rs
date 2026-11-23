@@ -90,6 +90,8 @@ pub enum Symbol {
     Led,
     Npn,
     Pnp,
+    Nmos,
+    Pmos,
     OpAmp,
     Ground,
     Rail,
@@ -556,7 +558,7 @@ impl Library {
                 "Transistors",
                 "DEVICE",
                 "SOT23",
-                Symbol::Npn,
+                Symbol::Nmos,
                 SimKind::Npn,
                 "2N7002",
                 "Q",
@@ -631,13 +633,13 @@ impl Library {
                 },
                 PinDef {
                     name: "C".into(),
-                    pos: P::new(50.0, -60.0),
-                    dir: 90,
+                    pos: P::new(50.0, 60.0),
+                    dir: 270,
                 },
                 PinDef {
                     name: "E".into(),
-                    pos: P::new(50.0, 60.0),
-                    dir: 270,
+                    pos: P::new(50.0, -60.0),
+                    dir: 90,
                 },
             ];
             p.push(q);
@@ -652,7 +654,7 @@ impl Library {
                 "SOIC-8",
                 Symbol::OpAmp,
                 SimKind::OpAmp,
-                "理想",
+                "IDEAL",
                 "U",
             );
             op.pins = vec![

@@ -3036,14 +3036,29 @@ fn draw_component(
                     Color32::from_rgb(0x62, 0x1B, 0x1A)
                 }
             } else {
-                BODY_RED
+                Color32::TRANSPARENT
             };
             p.add(Shape::convex_polygon(
                 tri,
                 diode_fill,
                 Stroke::new(thin, ink),
             ));
-            line(p, s(P::new(18.0, -26.0)), s(P::new(18.0, 26.0)), ink, 2.2);
+            // Cathode bar: straight for a plain diode or LED, bent ends for a
+            // Zener, squared S-shaped ends for a Schottky.
+            let kind = def.name.to_uppercase();
+            let bar: Vec<(f32, f32)> = if def.symbol == Symbol::Led {
+                vec![(18.0, -26.0), (18.0, 26.0)]
+            } else if kind.contains("ZENER") {
+                vec![(10.0, -32.0), (18.0, -26.0), (18.0, 26.0), (26.0, 32.0)]
+            } else if kind.contains("SCHOTTKY") {
+                vec![(26.0, -20.0), (26.0, -28.0), (18.0, -28.0), (18.0, 28.0), (10.0, 28.0), (10.0, 20.0)]
+            } else {
+                vec![(18.0, -26.0), (18.0, 26.0)]
+            };
+            p.add(Shape::line(
+                bar.iter().map(|&(x, y)| s(P::new(x, y))).collect(),
+                Stroke::new(2.2, ink),
+            ));
             if def.symbol == Symbol::Led {
                 for d in [0.0, 14.0] {
                     let a = s(P::new(-6.0 + d, -34.0));
@@ -3107,34 +3122,62 @@ fn draw_component(
             }
         }
         Symbol::Npn | Symbol::Pnp => {
-            let r = 44.0;
-            let a = s(P::new(-r, -r));
-            let b = s(P::new(r, r));
-            let circ = Rect::from_two_pos(a, b);
+            // Circle, base plate, and collector/emitter leads that run all
+            // the way to the pin leads. N-type has the collector on top; P-type
+            // draws the emitter on top, with its arrow pointing at the base.
+            let pnp = def.symbol == Symbol::Pnp;
+            let circ = Rect::from_two_pos(s(P::new(-44.0, -44.0)), s(P::new(44.0, 44.0)));
             p.circle_stroke(circ.center(), circ.width() * 0.5, Stroke::new(thin, ink));
-            line(p, s(P::new(-46.0, 0.0)), s(P::new(-10.0, 0.0)), ink, thin);
+            line(p, s(P::new(-68.0, 0.0)), s(P::new(-10.0, 0.0)), ink, thin);
             line(p, s(P::new(-10.0, -26.0)), s(P::new(-10.0, 26.0)), ink, 2.0);
-            line(
-                p,
-                s(P::new(-10.0, -12.0)),
-                s(P::new(34.0, -44.0)),
-                ink,
-                thin,
-            );
-            line(p, s(P::new(-10.0, 12.0)), s(P::new(34.0, 44.0)), ink, thin);
-            // arrow on the emitter
-            let tip = if def.symbol == Symbol::Npn {
-                s(P::new(20.0, 32.0))
+            line(p, s(P::new(-10.0, -12.0)), s(P::new(50.0, -38.0)), ink, thin);
+            line(p, s(P::new(-10.0, 12.0)), s(P::new(50.0, 38.0)), ink, thin);
+            let (tip, dir) = if pnp {
+                (P::new(5.0, -18.5), (-0.9205f32, 0.3989f32))
             } else {
-                s(P::new(4.0, -20.0))
+                (P::new(33.2, 30.7), (0.9205f32, 0.3989f32))
             };
-            let dir = if def.symbol == Symbol::Npn { 1.0 } else { -1.0 };
-            let arrow = vec![
-                tip,
-                tip + Vec2::new(-6.0 * v.zoom * 3.0, -8.0 * v.zoom * 3.0 * dir),
-                tip + Vec2::new(6.0 * v.zoom * 3.0, 6.0 * v.zoom * 3.0 * dir),
-            ];
-            p.add(Shape::convex_polygon(arrow, ink, Stroke::NONE));
+            let n = (-dir.1, dir.0);
+            let back = (tip.x - dir.0 * 13.0, tip.y - dir.1 * 13.0);
+            p.add(Shape::convex_polygon(
+                vec![
+                    s(tip),
+                    s(P::new(back.0 + n.0 * 5.5, back.1 + n.1 * 5.5)),
+                    s(P::new(back.0 - n.0 * 5.5, back.1 - n.1 * 5.5)),
+                ],
+                ink,
+                Stroke::NONE,
+            ));
+        }
+        Symbol::Nmos | Symbol::Pmos => {
+            // Gate plate, a three-part channel, drain and source leads, and a
+            // body connection with an arrow. P-channel is the same drawing
+            // mirrored top to bottom with the arrow reversed.
+            let pmos = def.symbol == Symbol::Pmos;
+            let m = |x: f32, y: f32| s(P::new(x, if pmos { -y } else { y }));
+            line(p, m(-68.0, 0.0), m(-28.0, 0.0), ink, thin);
+            line(p, m(-28.0, -26.0), m(-28.0, 26.0), ink, 2.0);
+            for (y0, y1) in [(-30.0, -16.0), (-8.0, 8.0), (16.0, 30.0)] {
+                line(p, m(-14.0, y0), m(-14.0, y1), ink, 2.0);
+            }
+            // Drain and source leads run to the pin leads at (50, +-38).
+            for end in [-1.0f32, 1.0] {
+                p.add(Shape::line(
+                    vec![m(-14.0, 23.0 * end), m(50.0, 23.0 * end), m(50.0, 38.0 * end)],
+                    Stroke::new(thin, ink),
+                ));
+            }
+            // Body connection from the middle of the channel to the source.
+            p.add(Shape::line(
+                vec![m(-14.0, 0.0), m(30.0, 0.0), m(30.0, 23.0)],
+                Stroke::new(thin, ink),
+            ));
+            let (tip_x, back_x) = if pmos { (-2.0, -14.0) } else { (-14.0, -2.0) };
+            p.add(Shape::convex_polygon(
+                vec![m(tip_x, 0.0), m(back_x, -5.0), m(back_x, 5.0)],
+                ink,
+                Stroke::NONE,
+            ));
         }
         Symbol::OpAmp => {
             let tri = vec![
@@ -3313,34 +3356,40 @@ fn draw_component(
                 s(P::new(maxx - 18.0, maxy + 26.0)),
             );
             rect(p, body, Some(Color32::from_rgb(0x10, 0x18, 0x10)), ink, 1.8);
-            // notch
-            let notch = Rect::from_center_size(
-                Pos2::new(body.left() + 6.0 * v.zoom.max(0.3), body.center().y),
-                Vec2::new(8.0 * v.zoom.max(0.3), 8.0 * v.zoom.max(0.3)),
+            // Pin-1 notch on the top edge, clear of every pin label.
+            p.circle_stroke(
+                Pos2::new(body.center().x, body.top()),
+                (7.0 * v.zoom).max(3.0),
+                Stroke::new(1.2, ink),
             );
-            p.circle_stroke(notch.center(), notch.width() * 0.5, Stroke::new(1.2, ink));
+            // Pin identity is part of the circuit. Show it once the view is
+            // large enough to read; remember the widest label on each side so
+            // the part value can avoid them.
+            let labels_on = v.zoom >= 0.42;
+            let (mut widest_left, mut widest_right) = (0usize, 0usize);
             for (index, pd) in pins.iter().enumerate() {
                 let nm = s(pd.pos);
                 let inward = P::new(pd.pos.x.signum() * -1.0, 0.0).rot(c.rot);
                 let edge = s(pd.pos.add(inward.mul(24.0)));
                 line(p, nm, edge, ink, 1.2);
-
-                // Pin identity is part of the circuit, not hidden metadata.
-                // Keep it visible on IC/board symbols once the view is large
-                // enough to read without turning the canvas into a grey blur.
-                if v.zoom >= 0.42 {
+                let number = index + 1;
+                let label = if pd.name == number.to_string() {
+                    number.to_string()
+                } else {
+                    format!("{number}  {}", pd.name)
+                };
+                if pd.pos.x < 0.0 {
+                    widest_left = widest_left.max(label.chars().count());
+                } else {
+                    widest_right = widest_right.max(label.chars().count());
+                }
+                if labels_on {
                     let local_in = if pd.pos.x < 0.0 { 33.0 } else { -33.0 };
                     let label_pos = s(pd.pos.add(P::new(local_in, 0.0)));
                     let align = if label_pos.x < body.center().x {
                         egui::Align2::LEFT_CENTER
                     } else {
                         egui::Align2::RIGHT_CENTER
-                    };
-                    let number = index + 1;
-                    let label = if pd.name == number.to_string() {
-                        number.to_string()
-                    } else {
-                        format!("{number}  {}", pd.name)
                     };
                     p.text(
                         label_pos,
@@ -3351,10 +3400,23 @@ fn draw_component(
                     );
                 }
             }
+            // The part value goes in the middle when it fits between the pin
+            // labels, otherwise just under the body.
+            let value = if c.value.is_empty() { def.value.clone() } else { c.value.clone() };
+            let char_w = 0.6 * (9.5 * v.zoom).clamp(7.5, 12.0);
+            let value_w = value.chars().count() as f32 * 0.6 * 13.0;
+            let room = |chars: usize| body.width() * 0.5 - (15.0 * v.zoom + chars as f32 * char_w);
+            let fits = !labels_on
+                || (room(widest_left) >= value_w * 0.5 + 4.0 && room(widest_right) >= value_w * 0.5 + 4.0);
+            let (anchor, align) = if fits {
+                (body.center(), egui::Align2::CENTER_CENTER)
+            } else {
+                (Pos2::new(body.center().x, body.bottom() + 3.0), egui::Align2::CENTER_TOP)
+            };
             p.text(
-                body.center(),
-                egui::Align2::CENTER_CENTER,
-                def.value.clone(),
+                anchor,
+                align,
+                value,
                 FontId::new(13.0, FontFamily::Proportional),
                 Color32::from_rgb(0xE0, 0xE0, 0xE0),
             );
@@ -3393,7 +3455,12 @@ fn draw_component(
         .text_size
         .map(|(height, _)| (height as f32 / 20.0).clamp(4.0, 96.0));
     if show_text && !hidden("REF") && !hidden("REFERENCE") && !c.refdes.is_empty() {
-        let anchor = s(P::new(0.0, -66.0));
+        let top = def.pins.iter().map(|pd| pd.pos.y).fold(0.0f32, f32::min);
+        let anchor = match def.symbol {
+            Symbol::Ic => s(P::new(0.0, top - 38.0)),
+            Symbol::OpAmp => s(P::new(0.0, -96.0)),
+            _ => s(P::new(0.0, -66.0)),
+        };
         p.text(
             anchor,
             egui::Align2::CENTER_BOTTOM,
@@ -3403,7 +3470,7 @@ fn draw_component(
         );
     }
     if show_text && !hidden("VALUE") && !c.value.is_empty() && def.symbol != Symbol::Ic {
-        let anchor = s(P::new(0.0, 70.0));
+        let anchor = s(P::new(0.0, if def.symbol == Symbol::OpAmp { 118.0 } else { 70.0 }));
         p.text(
             anchor,
             egui::Align2::CENTER_TOP,
