@@ -682,7 +682,13 @@ impl Dialogs {
                             if !q.is_empty() && !hay.contains(&q) {
                                 continue;
                             }
-                            if ui.button(format!("{}  -  {}", def.id, def.name)).clicked() {
+                            let clicked = ui
+                                .horizontal(|ui| {
+                                    crate::schematic::part_icon(ui, def, lib);
+                                    ui.button(format!("{}  -  {}", def.id, def.name)).clicked()
+                                })
+                                .inner;
+                            if clicked {
                                 self.pick_selected = Some(def.id.clone());
                                 self.active = None;
                             }

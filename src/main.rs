@@ -6,6 +6,7 @@ mod io;
 mod ui_text;
 mod model;
 mod panels;
+mod parts_extra;
 mod pdsprj;
 mod pcb;
 mod schematic;

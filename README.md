@@ -18,6 +18,11 @@ It is early work. Expect rough edges and file-format changes.
 - PCB layout with design-rule checks.
 - Exports: bill of materials, Gerber and pick-and-place files.
 - Undo and redo, property assignment and search tools.
+- Parts library of about 180 parts with a small symbol preview beside each
+  one: diodes, LEDs, transistors, op-amps, 74-series and 4000-series logic,
+  regulators, drivers, microcontrollers, sensors, displays and connectors.
+  Diodes, LEDs, transistors and dual op-amps are simulated; the rest are
+  pin-accurate blocks for schematic and PCB work.
 - Built-in example circuits (Examples menu): LED, voltage divider,
   transistor switch, RC charging, op-amp amplifier and diode rectifier.
 - Import of `.pdsprj` projects. Voltwright brings across the parts it has

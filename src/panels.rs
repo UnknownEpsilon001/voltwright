@@ -15,10 +15,16 @@ use crate::theme::*;
 fn library_part_row(
     ui: &mut egui::Ui,
     part: &crate::model::PartDef,
+    lib: &Library,
     selected_part: &mut Option<String>,
 ) -> Option<PanelAction> {
     let selected = selected_part.as_deref() == Some(part.id.as_str());
-    let response = ui.selectable_label(selected, format!("{}   ({})", part.name, part.value));
+    let response = ui
+        .horizontal(|ui| {
+            crate::schematic::part_icon(ui, part, lib);
+            ui.selectable_label(selected, format!("{}   ({})", part.name, part.value))
+        })
+        .inner;
     if response.clicked() {
         *selected_part = Some(part.id.clone());
     }
@@ -293,7 +299,7 @@ impl Panels {
                             .show(ui, |ui| {
                                 for part in parts {
                                     if let Some(action) =
-                                        library_part_row(ui, part, &mut self.selected_part)
+                                        library_part_row(ui, part, lib, &mut self.selected_part)
                                     {
                                         act = action;
                                     }
@@ -302,7 +308,7 @@ impl Panels {
                     }
                 } else {
                     for part in hits {
-                        if let Some(action) = library_part_row(ui, part, &mut self.selected_part) {
+                        if let Some(action) = library_part_row(ui, part, lib, &mut self.selected_part) {
                             act = action;
                         }
                     }

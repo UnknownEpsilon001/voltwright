@@ -153,7 +153,7 @@ impl PartDef {
     }
 }
 
-fn two_pin(
+pub(crate) fn two_pin(
     id: &str,
     name: &str,
     cat: &str,
@@ -190,7 +190,7 @@ fn two_pin(
     }
 }
 
-fn ic_pins(count: usize) -> Vec<PinDef> {
+pub(crate) fn ic_pins(count: usize) -> Vec<PinDef> {
     let mut pins = Vec::new();
     let left = count / 2;
     for i in 0..left {
@@ -217,7 +217,7 @@ fn ic_pins(count: usize) -> Vec<PinDef> {
 
 /// Build a numbered DIP/development-board symbol from its real pin functions.
 /// Pin indices stay in physical-number order so saved wire endpoints are stable.
-fn named_dual_row_pins(names: &[&str], width: f32) -> Vec<PinDef> {
+pub(crate) fn named_dual_row_pins(names: &[&str], width: f32) -> Vec<PinDef> {
     let left = names.len().div_ceil(2);
     let right = names.len() - left;
     names
@@ -261,7 +261,7 @@ fn named_gpio_header_pins(names: &[&str], width: f32) -> Vec<PinDef> {
         .collect()
 }
 
-fn named_part(
+pub(crate) fn named_part(
     id: &str,
     name: &str,
     category: &str,
@@ -1530,6 +1530,7 @@ impl Library {
             datasheet: String::new(),
         });
 
+        crate::parts_extra::add_all(&mut p);
         Library { parts: p }
     }
 

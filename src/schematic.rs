@@ -2769,6 +2769,63 @@ fn rect(p: &egui::Painter, r: Rect, fill: Option<Color32>, stroke: Color32, w: f
     }
 }
 
+/// Draw a small preview of a part's schematic symbol and reserve its space in
+/// the layout. Used beside part names in the library and Pick Devices lists.
+pub fn part_icon(ui: &mut egui::Ui, def: &crate::model::PartDef, lib: &Library) -> egui::Response {
+    let size = Vec2::new(46.0, 30.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    // Chips with many pins would shrink to a sliver; show a generic 8-pin chip.
+    let mut icon_def = def.clone();
+    icon_def.value.clear();
+    if icon_def.symbol == Symbol::Ic && icon_def.pins.len() > 8 {
+        icon_def.pins = crate::model::ic_pins(8);
+    }
+    // Fit the symbol: pins plus a minimum drawing area, centred in the box.
+    let mut pts: Vec<P> = icon_def.pins.iter().map(|pd| pd.pos).collect();
+    pts.extend([P::new(-50.0, -34.0), P::new(50.0, 34.0)]);
+    match def.symbol {
+        Symbol::Rail => pts.push(P::new(0.0, -50.0)),
+        Symbol::Ground => pts.push(P::new(0.0, 46.0)),
+        Symbol::Ic => {
+            // The body extends 26 units past the first and last pin row.
+            let (top, bottom) = icon_def.pins.iter().fold((0.0f32, 0.0f32), |(t, b), pd| {
+                (t.min(pd.pos.y), b.max(pd.pos.y))
+            });
+            pts.extend([P::new(0.0, top - 26.0), P::new(0.0, bottom + 26.0)]);
+        }
+        _ => {}
+    }
+    let (lo, hi) = crate::model::bbox(&pts, 6.0).unwrap_or((P::new(-60.0, -40.0), P::new(60.0, 40.0)));
+    let zoom = ((rect.width() / (hi.x - lo.x)).min(rect.height() / (hi.y - lo.y))).min(0.5);
+    let mid = P::new((lo.x + hi.x) * 0.5, (lo.y + hi.y) * 0.5);
+    let v = View {
+        zoom,
+        off: Vec2::new(
+            rect.center().x - mid.x * zoom,
+            rect.center().y - mid.y * zoom,
+        ),
+    };
+    let c = Component {
+        id: 0,
+        part: def.id.clone(),
+        refdes: String::new(),
+        value: String::new(),
+        x: 0.0,
+        y: 0.0,
+        rot: 0,
+        props: Vec::new(),
+        hidden_props: Vec::new(),
+        text_size: None,
+    };
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 3.0, Color32::from_rgb(0x0C, 0x10, 0x14));
+    draw_component(&painter, &v, &c, &icon_def, None, lib, None);
+    response
+}
+
 fn draw_component(
     p: &egui::Painter,
     v: &View,
@@ -2927,6 +2984,12 @@ fn draw_component(
                 Color32::from_rgb(0x35, 0xF0, 0x68)
             } else if def.id.contains("YELLOW") {
                 Color32::from_rgb(0xFF, 0xD8, 0x3D)
+            } else if def.id.contains("BLUE") {
+                Color32::from_rgb(0x38, 0x80, 0xFF)
+            } else if def.id.contains("WHITE") {
+                Color32::from_rgb(0xF4, 0xF4, 0xFF)
+            } else if def.id.contains("ORANGE") {
+                Color32::from_rgb(0xFF, 0x8C, 0x20)
             } else {
                 Color32::from_rgb(0xFF, 0x38, 0x28)
             };
