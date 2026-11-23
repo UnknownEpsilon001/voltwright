@@ -1,6 +1,7 @@
 // LEO WAS HERE ;3
 mod bom;
 mod dialogs;
+mod editor;
 mod examples;
 mod io;
 mod ui_text;
@@ -1298,7 +1299,7 @@ impl eframe::App for AppState {
                                 }
                             });
                         });
-                    self.tab_scroll = strip.state.offset().x;
+                    self.tab_scroll = strip.state.clamped_offset().x;
                     if ui.rect_contains_pointer(strip.inner_rect) {
                         let wheel = ui.input(|i| i.smooth_scroll_delta);
                         let step = if wheel.x != 0.0 { wheel.x } else { wheel.y };
@@ -1705,6 +1706,12 @@ fn main() {
     let mut shot: Option<PathBuf> = None;
     let args: Vec<String> = std::env::args().collect();
     let start_live = args.iter().any(|arg| arg == "--simulate");
+    // Developer aid for screenshots: --tab source|pcb|simulation|home
+    let start_tab = args
+        .iter()
+        .position(|arg| arg == "--tab")
+        .and_then(|i| args.get(i + 1))
+        .cloned();
     let mut i = 1;
     while i < args.len() {
         if args[i] == "--screenshot" {
@@ -1744,6 +1751,13 @@ fn main() {
             let mut app = AppState::new();
             if start_live {
                 app.start_simulation();
+            }
+            match start_tab.as_deref() {
+                Some("source") => app.tab = Tab::Source,
+                Some("pcb") => app.tab = Tab::Pcb,
+                Some("simulation") => app.tab = Tab::Simulation,
+                Some("home") => app.tab = Tab::Home,
+                _ => {}
             }
             if let Ok(Some(p)) = shot_cell.lock().map(|mut g| g.take()) {
                 app.shot = Some((p, 120, false, Arc::new(AtomicBool::new(false))));

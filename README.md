@@ -23,6 +23,11 @@ It is early work. Expect rough edges and file-format changes.
   regulators, drivers, microcontrollers, sensors, displays and connectors.
   Diodes, LEDs, transistors and dual op-amps are simulated; the rest are
   pin-accurate blocks for schematic and PCB work.
+- Source code editor with syntax colours for C/C++/Arduino, Python and
+  assembly, line numbers, and file open and save. You can load a compiled
+  `.bin` or Intel HEX file to check its checksums and browse its bytes.
+  Voltwright has no compiler or CPU emulator yet, so firmware is not run in
+  the simulation.
 - Built-in example circuits (Examples menu): LED, voltage divider,
   transistor switch, RC charging, op-amp amplifier and diode rectifier.
 - Import of `.pdsprj` projects. Voltwright brings across the parts it has

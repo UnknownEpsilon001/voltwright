@@ -81,6 +81,7 @@ pub struct Panels {
     pub bom_filter: String,
     pub log: String,
     pub notes_scroll: f32,
+    pub editor: crate::editor::SourceEditor,
 }
 
 impl Default for Panels {
@@ -96,6 +97,7 @@ impl Default for Panels {
             bom_filter: String::new(),
             log: String::new(),
             notes_scroll: 0.0,
+            editor: crate::editor::SourceEditor::default(),
         }
     }
 }
@@ -352,35 +354,8 @@ impl Panels {
     // ------------------------------------------------------------ source
 
     pub fn source_code(&mut self, ui: &mut egui::Ui, proj: &mut Project) {
-        ui.horizontal(|ui| {
-            ui.label("Source Code");
-            if ui.button("Compile").clicked() {
-                let lines = proj.source.lines().count();
-                let words = proj.source.split_whitespace().count();
-                self.log = format!(
-                    "Build complete - {lines} lines, {words} tokens, 0 errors, 0 warnings.\r\nTarget: 8-bit MCU (simulation firmware)."
-                );
-            }
-            if ui.button("Reload").clicked() {
-                proj.source = crate::model::default_source();
-                proj.dirty = true;
-                self.log = "Source reloaded from the default template.".into();
-            }
-        });
-        ui.separator();
-        let r = ui.add(
-            egui::TextEdit::multiline(&mut proj.source)
-                .code_editor()
-                .desired_width(f32::INFINITY)
-                .desired_rows(26)
-                .font(FontId::new(14.0, FontFamily::Monospace)),
-        );
-        if r.changed() {
+        if self.editor.ui(ui, &mut proj.source) {
             proj.dirty = true;
-        }
-        if !self.log.is_empty() {
-            ui.separator();
-            ui.colored_label(OK, &self.log);
         }
     }
 
