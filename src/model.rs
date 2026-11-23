@@ -2195,8 +2195,10 @@ impl Project {
 
     /// Place a footprint for any component that does not have one yet.
     pub fn sync_pcb(&mut self, lib: &Library, netlist: &Netlist) {
-        let mut col = 0usize;
-        let mut row = 0usize;
+        // Continue the placement grid after footprints already on the board,
+        // so new parts never land on top of earlier ones.
+        let mut col = self.fps.len() % 4;
+        let mut row = self.fps.len() / 4;
         for c in &self.comps {
             if self.fps.iter().any(|f| f.comp == c.id) {
                 continue;

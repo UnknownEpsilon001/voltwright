@@ -72,6 +72,8 @@ enum PcbDrag {
 }
 
 pub struct Pcb {
+    /// Fit the board into the view on the next paint.
+    pub needs_fit: bool,
     pub view: PcbView,
     pub tool: PcbTool,
     pub active_layer: Layer,
@@ -96,6 +98,7 @@ impl Default for Pcb {
             visible.insert(l);
         }
         Pcb {
+            needs_fit: true,
             view: PcbView::default(),
             tool: PcbTool::Select,
             active_layer: Layer::TopCopper,
@@ -258,7 +261,11 @@ impl Pcb {
         let mut zoom_in = false;
         let mut zoom_out = false;
         let mut centre = false;
+        let typing = ui.ctx().egui_wants_keyboard_input();
         ui.input(|i| {
+            if typing {
+                return;
+            }
             esc = i.key_pressed(egui::Key::Escape);
             del = i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace);
             rot = i.key_pressed(egui::Key::R);
@@ -276,7 +283,8 @@ impl Pcb {
             }
         }
 
-        if fit {
+        if fit || self.needs_fit {
+            self.needs_fit = false;
             self.zoom_to_fit(rect, &proj.board);
             self.hint = "Zoom to whole board".into();
         }

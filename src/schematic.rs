@@ -1397,7 +1397,13 @@ impl Schematic {
         let mut snap: Option<usize> = None;
         let mut redraw = false;
         let placing = self.pending.is_some();
+        // Keys typed into a text field (a dialog, the label box) belong to
+        // that field, not to the canvas shortcuts.
+        let typing = ui.ctx().egui_wants_keyboard_input();
         ui.input(|i| {
+            if typing {
+                return;
+            }
             let ctrl = i.modifiers.ctrl || i.modifiers.command;
             let r_key = i.key_pressed(egui::Key::R);
             rotate = r_key || i.key_pressed(egui::Key::Plus);
@@ -2474,8 +2480,17 @@ impl Schematic {
             let selected = self.sel.contains(&c.id);
             let hovered = self.hot_comp == Some(c.id) && !selected;
             if selected || hovered {
-                let pins = proj.pins_of(lib, c);
-                if let Some(r) = bbox_of(&pins, 40.0) {
+                let mut pins = proj.pins_of(lib, c);
+                // One-pin symbols draw their body on one side of the pin; box
+                // the drawing, not a square centred on the pin.
+                let body: &[P] = match def.symbol {
+                    Symbol::Rail => &[P { x: -14.0, y: -58.0 }, P { x: 14.0, y: 0.0 }],
+                    Symbol::Ground => &[P { x: -34.0, y: 0.0 }, P { x: 34.0, y: 46.0 }],
+                    _ => &[],
+                };
+                pins.extend(body.iter().map(|q| c.pos().add(q.rot(c.rot))));
+                let pad = if body.is_empty() { 40.0 } else { 8.0 };
+                if let Some(r) = bbox_of(&pins, pad) {
                     let a = self.view.to_screen(P::new(r.min.x, r.min.y));
                     let b = self.view.to_screen(P::new(r.max.x, r.max.y));
                     let rr = Rect::from_two_pos(a, b);

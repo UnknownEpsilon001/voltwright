@@ -175,6 +175,7 @@ impl AppState {
         self.schematic.clear_selection();
         self.schematic.request_fit();
         self.pcb.clear_selection();
+        self.pcb.needs_fit = true;
         self.schematic.draft.clear();
         self.pcb.draft.clear();
         self.sim = None;
@@ -1217,7 +1218,9 @@ impl eframe::App for AppState {
         egui::Panel::top("menu")
             .frame(egui::Frame::NONE.fill(theme::CHROME))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                // MenuBar lets an open menu follow the pointer to its
+                // neighbours, like a desktop menu bar.
+                egui::MenuBar::new().ui(ui, |ui| {
                     ui.add_space(8.0);
                     ui.label(RichText::new("Voltwright").size(15.0).color(theme::WIRE).strong());
                     ui.separator();
@@ -1656,6 +1659,30 @@ fn demo_project(lib: &model::Library) -> model::Project {
     proj
 }
 
+/// Black-and-white window icon: a diode symbol (triangle and bar on a lead).
+fn app_icon() -> egui::IconData {
+    const N: usize = 64;
+    let mut rgba = vec![0u8; N * N * 4];
+    let inside_triangle = |x: f32, y: f32| {
+        // Triangle pointing right: base at x = 14, tip at x = 40, y centred at 32.
+        let (x0, x1, cy, half) = (14.0, 40.0, 32.0, 17.0);
+        x >= x0 && x <= x1 && (y - cy).abs() <= half * (x1 - x) / (x1 - x0)
+    };
+    for py in 0..N {
+        for px in 0..N {
+            let (x, y) = (px as f32 + 0.5, py as f32 + 0.5);
+            let tri = inside_triangle(x, y);
+            let bar = (40.0..=46.0).contains(&x) && (14.0..=50.0).contains(&y);
+            let lead = (y - 32.0).abs() <= 2.5 && ((3.0..=14.0).contains(&x) || (46.0..=61.0).contains(&x));
+            let ink = tri || bar || lead;
+            let tile = if ink { [0u8, 0, 0, 255] } else { [255u8, 255, 255, 255] };
+            let at = (py * N + px) * 4;
+            rgba[at..at + 4].copy_from_slice(&tile);
+        }
+    }
+    egui::IconData { rgba, width: N as u32, height: N as u32 }
+}
+
 fn save_png(path: &std::path::Path, img: &egui::ColorImage) {
     let mut buf = Vec::with_capacity(img.size[0] * img.size[1] * 4);
     for p in &img.pixels {
@@ -1693,7 +1720,9 @@ fn main() {
 
     let mut vp = egui::ViewportBuilder::default()
         .with_title("Voltwright")
-        .with_inner_size([1440.0, 900.0]);
+        .with_inner_size([1440.0, 900.0])
+        .with_maximized(true)
+        .with_icon(std::sync::Arc::new(app_icon()));
     if shot.is_some() {
         vp = vp.with_active(false);
         #[cfg(target_os = "windows")]
