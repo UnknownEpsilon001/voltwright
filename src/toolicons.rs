@@ -59,12 +59,13 @@ fn draw(p: &egui::Painter, r: Rect, icon: Icon, ink: Color32) {
     };
     match icon {
         Icon::Select => {
-            // Arrow pointer.
+            // Arrow pointer: a filled head with a short tail.
             p.add(Shape::convex_polygon(
-                vec![at(0.1, 0.0), at(0.1, 0.9), at(0.35, 0.68), at(0.55, 1.0), at(0.72, 0.9), at(0.52, 0.6), at(0.85, 0.58)],
+                vec![at(0.12, 0.0), at(0.12, 0.82), at(0.8, 0.58)],
                 ink,
                 Stroke::NONE,
             ));
+            p.add(Shape::line(vec![at(0.42, 0.66), at(0.66, 1.0)], Stroke::new(2.6, ink)));
         }
         Icon::Wire => {
             line(&[(0.0, 0.85), (0.4, 0.85), (0.4, 0.15), (1.0, 0.15)]);

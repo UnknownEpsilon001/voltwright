@@ -3061,7 +3061,7 @@ pub fn cursor_for_mode(tool: Tool, drawing_wire: bool, over_pin: bool, over_part
         Tool::Wire => C::Crosshair,
         Tool::Part => C::Copy,
         Tool::Label | Tool::Text => C::Text,
-        Tool::Probe => C::Cell,
+        Tool::Probe => C::PointingHand,
         Tool::Delete => C::NotAllowed,
     }
 }
@@ -3327,12 +3327,21 @@ fn draw_component(
                 Stroke::new(2.2, ink),
             ));
             if def.symbol == Symbol::Led {
-                for d in [0.0, 14.0] {
-                    let a = s(P::new(-6.0 + d, -34.0));
-                    let b = s(P::new(6.0 + d, -46.0));
-                    line(p, a, b, ink, 1.2);
+                // Two light rays leave the junction up and to the right; each
+                // arrowhead is built from the ray's own direction.
+                let dir = (0.7071f32, -0.7071f32);
+                let nrm = (0.7071f32, 0.7071f32);
+                for d in [0.0f32, 16.0] {
+                    let from = (-8.0 + d, -30.0);
+                    let tip = (from.0 + dir.0 * 20.0, from.1 + dir.1 * 20.0);
+                    line(p, s(P::new(from.0, from.1)), s(P::new(tip.0, tip.1)), ink, 1.4);
+                    let back = (tip.0 - dir.0 * 8.0, tip.1 - dir.1 * 8.0);
                     p.add(Shape::convex_polygon(
-                        vec![b, b + Vec2::new(-4.0, 1.0), b + Vec2::new(-1.0, 4.0)],
+                        vec![
+                            s(P::new(tip.0, tip.1)),
+                            s(P::new(back.0 + nrm.0 * 3.5, back.1 + nrm.1 * 3.5)),
+                            s(P::new(back.0 - nrm.0 * 3.5, back.1 - nrm.1 * 3.5)),
+                        ],
                         ink,
                         Stroke::NONE,
                     ));
@@ -4512,7 +4521,7 @@ mod tests {
         assert_eq!(plain(Tool::Wire), C::Crosshair);
         assert_eq!(plain(Tool::Part), C::Copy);
         assert_eq!(plain(Tool::Label), C::Text);
-        assert_eq!(plain(Tool::Probe), C::Cell);
+        assert_eq!(plain(Tool::Probe), C::PointingHand);
         assert_eq!(plain(Tool::Delete), C::NotAllowed);
         // Select shows what a click would do under the pointer.
         assert_eq!(cursor_for_mode(Tool::Select, false, true, false), C::Crosshair);
