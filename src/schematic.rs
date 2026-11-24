@@ -1582,8 +1582,15 @@ impl Schematic {
         let hover_world = hover.map(|h| self.view.to_world(h));
         self.hot_pin = hover_world.and_then(|w| Self::hit_pin(proj, lib, w));
         self.hot_comp = hover_world.and_then(|w| self.hit_component(proj, lib, w));
-        if self.tool == Tool::Select && self.drag.is_none() && self.hot_comp.is_some() {
-            ui.output_mut(|o| o.cursor_icon = egui::CursorIcon::Grab);
+        // The pointer shows the active mode, so it is clear what a click does.
+        if hover.is_some() && !self.pan_mode && self.drag.is_none() {
+            let icon = cursor_for_mode(
+                self.tool,
+                !self.draft.is_empty(),
+                self.hot_pin.is_some(),
+                self.hot_comp.is_some(),
+            );
+            ui.output_mut(|o| o.cursor_icon = icon);
         }
 
         // A right click is consumed by the active gesture, so remember which
@@ -3036,6 +3043,25 @@ pub fn part_icon(ui: &mut egui::Ui, def: &crate::model::PartDef, lib: &Library) 
     response
 }
 
+/// Mouse pointer for each schematic mode. A wire in progress and a pin under
+/// the pointer both show a crosshair, because a click there makes a wire.
+pub fn cursor_for_mode(tool: Tool, drawing_wire: bool, over_pin: bool, over_part: bool) -> egui::CursorIcon {
+    use egui::CursorIcon as C;
+    if drawing_wire {
+        return C::Crosshair;
+    }
+    match tool {
+        Tool::Select if over_pin => C::Crosshair,
+        Tool::Select if over_part => C::Grab,
+        Tool::Select => C::Default,
+        Tool::Wire => C::Crosshair,
+        Tool::Part => C::Copy,
+        Tool::Label | Tool::Text => C::Text,
+        Tool::Probe => C::Cell,
+        Tool::Delete => C::NotAllowed,
+    }
+}
+
 /// How far from the centre, along the pin axis, each two-pin symbol's drawing
 /// begins on its left and right side. Pin leads run to exactly this distance so
 /// the symbol and its pins form one unbroken line.
@@ -3233,25 +3259,24 @@ fn draw_component(
                     .map(|_| 0.88 + 0.12 * ((clock * 9.0) % std::f64::consts::TAU).sin() as f32)
                     .unwrap_or(1.0);
                 let center = s(P::ZERO);
+                // Three soft rings and a hot core, so a lit LED is obvious
+                // even when the whole sheet is zoomed out.
+                for (radius, base, gain) in [(96.0, 18.0, 28.0), (62.0, 34.0, 50.0), (38.0, 56.0, 60.0)] {
+                    p.circle_filled(
+                        center,
+                        radius * v.zoom.max(0.4) * pulse,
+                        Color32::from_rgba_premultiplied(
+                            led_color.r(),
+                            led_color.g(),
+                            led_color.b(),
+                            (base + lit * gain).min(255.0) as u8,
+                        ),
+                    );
+                }
                 p.circle_filled(
                     center,
-                    48.0 * v.zoom * pulse,
-                    Color32::from_rgba_premultiplied(
-                        led_color.r(),
-                        led_color.g(),
-                        led_color.b(),
-                        (22.0 + lit * 35.0) as u8,
-                    ),
-                );
-                p.circle_filled(
-                    center,
-                    33.0 * v.zoom * pulse,
-                    Color32::from_rgba_premultiplied(
-                        led_color.r(),
-                        led_color.g(),
-                        led_color.b(),
-                        (45.0 + lit * 70.0) as u8,
-                    ),
+                    9.0 * v.zoom.max(0.4),
+                    Color32::from_rgba_premultiplied(255, 255, 255, (30.0 + lit * 60.0) as u8),
                 );
             }
             let tri = vec![
@@ -3654,6 +3679,21 @@ fn draw_component(
                 FontId::new(13.0, FontFamily::Proportional),
                 Color32::from_rgb(0xE0, 0xE0, 0xE0),
             );
+            // While the circuit runs, a timer shows the state of its output.
+            if def.sim == crate::model::SimKind::Timer {
+                if let Some(el) = sim.filter(|sm| sm.running).and_then(|sm| sm.element(&c.refdes)) {
+                    let high = el.latched;
+                    let (text, color) = if high {
+                        ("OUT HIGH", Color32::from_rgb(0x35, 0xF0, 0x68))
+                    } else {
+                        ("OUT LOW", Color32::from_rgb(0x90, 0x98, 0x90))
+                    };
+                    let at = Pos2::new(body.center().x, body.bottom() + 20.0);
+                    let w = text.len() as f32 * 7.4;
+                    p.circle_filled(Pos2::new(at.x - w * 0.5 - 9.0, at.y + 7.0), 5.0, color);
+                    p.text(at, egui::Align2::CENTER_TOP, text, FontId::new(12.0, FontFamily::Monospace), color);
+                }
+            }
         }
         Symbol::Source => {
             let r = 34.0;
@@ -4315,6 +4355,23 @@ mod tests {
             }
         }
         (wires, defective, counts, examples)
+    }
+
+    #[test]
+    fn every_mode_has_its_own_pointer() {
+        use egui::CursorIcon as C;
+        let plain = |t| cursor_for_mode(t, false, false, false);
+        assert_eq!(plain(Tool::Select), C::Default);
+        assert_eq!(plain(Tool::Wire), C::Crosshair);
+        assert_eq!(plain(Tool::Part), C::Copy);
+        assert_eq!(plain(Tool::Label), C::Text);
+        assert_eq!(plain(Tool::Probe), C::Cell);
+        assert_eq!(plain(Tool::Delete), C::NotAllowed);
+        // Select shows what a click would do under the pointer.
+        assert_eq!(cursor_for_mode(Tool::Select, false, true, false), C::Crosshair);
+        assert_eq!(cursor_for_mode(Tool::Select, false, false, true), C::Grab);
+        // A wire in progress always shows the crosshair.
+        assert_eq!(cursor_for_mode(Tool::Select, true, false, false), C::Crosshair);
     }
 
     #[test]

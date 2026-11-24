@@ -1759,6 +1759,13 @@ fn main() {
     let show_symbols = args.iter().position(|arg| arg == "--symbols").map(|i| {
         args.get(i + 1).filter(|a| !a.starts_with("--")).cloned().unwrap_or_default()
     });
+    // Developer aid: --shot-frames N waits N frames before a screenshot.
+    let shot_frames = args
+        .iter()
+        .position(|arg| arg == "--shot-frames")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|n| n.parse::<u32>().ok())
+        .unwrap_or(120);
     // Developer aid: --example N opens the Nth built-in example.
     let start_example = args
         .iter()
@@ -1808,9 +1815,6 @@ fn main() {
         Box::new(move |cc| {
             theme::apply(&cc.egui_ctx);
             let mut app = AppState::new();
-            if start_live {
-                app.start_simulation();
-            }
             if let Some(sheet) = &show_symbols {
                 let mut proj = model::Project::new("Symbol sheet");
                 let (ids, cols, dx, dy): (&[&str], usize, f32, f32) = if sheet == "ic" {
@@ -1853,8 +1857,11 @@ fn main() {
                 Some("home") => app.tab = Tab::Home,
                 _ => {}
             }
+            if start_live {
+                app.start_simulation();
+            }
             if let Ok(Some(p)) = shot_cell.lock().map(|mut g| g.take()) {
-                app.shot = Some((p, 120, false, Arc::new(AtomicBool::new(false))));
+                app.shot = Some((p, shot_frames, false, Arc::new(AtomicBool::new(false))));
             }
             Ok(Box::new(app))
         }),

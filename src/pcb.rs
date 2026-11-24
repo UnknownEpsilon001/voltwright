@@ -180,6 +180,17 @@ impl Pcb {
         let hover = resp.hover_pos();
         if let Some(h) = hover {
             self.mouse = self.view.to_world(h);
+            if !self.pan_mode {
+                use egui::CursorIcon as C;
+                ui.output_mut(|o| {
+                    o.cursor_icon = match self.tool {
+                        PcbTool::Select => C::Default,
+                        PcbTool::Track | PcbTool::Board => C::Crosshair,
+                        PcbTool::Via => C::Cell,
+                        PcbTool::Delete => C::NotAllowed,
+                    }
+                });
+            }
         }
 
         // Match the schematic canvas: use raw wheel events for instant,
