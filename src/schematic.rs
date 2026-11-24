@@ -957,10 +957,129 @@ impl Schematic {
         out
     }
 
+    /// True when a route is orthogonal, has no zero-length segment, never
+    /// doubles back on itself and never touches itself.
+    fn route_is_tidy(route: &[P]) -> bool {
+        if route.len() < 2 {
+            return false;
+        }
+        let segs: Vec<(P, P)> = route.windows(2).map(|w| (w[0], w[1])).collect();
+        if segs.iter().any(|(a, b)| a.dist(*b) < 0.5) {
+            return false;
+        }
+        if segs.iter().any(|(a, b)| (a.x - b.x).abs() > 0.5 && (a.y - b.y).abs() > 0.5) {
+            return false;
+        }
+        for t in route.windows(3) {
+            let (ab, bc) = (t[1].sub(t[0]), t[2].sub(t[1]));
+            if ab.x * bc.x + ab.y * bc.y < -0.5 && (ab.x * bc.y - ab.y * bc.x).abs() < 0.5 {
+                return false;
+            }
+        }
+        for i in 0..segs.len() {
+            for j in i + 2..segs.len() {
+                let (a, b) = (segs[i], segs[j]);
+                let touch = a.0.x.min(a.1.x) <= b.0.x.max(b.1.x) + 0.5
+                    && b.0.x.min(b.1.x) <= a.0.x.max(a.1.x) + 0.5
+                    && a.0.y.min(a.1.y) <= b.0.y.max(b.1.y) + 0.5
+                    && b.0.y.min(b.1.y) <= a.0.y.max(a.1.y) + 0.5;
+                if touch {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Rubber-band a wire after one of its pins moved. Every bend the wire
+    /// already has is kept; only the two segments beside each moved end slide
+    /// or stretch to follow the pin. Returns None when that is not safe (the
+    /// wire is a junction point for another wire, or the result is untidy), in
+    /// which case the caller routes the wire again.
+    fn stretch_wire(proj: &Project, lib: &Library, wire: &Wire) -> Option<Vec<P>> {
+        let orig = &wire.pts;
+        let n = orig.len();
+        if n < 2 {
+            return None;
+        }
+        let new_start = wire.start_pin.and_then(|p| Self::pin_position(proj, lib, p));
+        let new_end = wire.end_pin.and_then(|p| Self::pin_position(proj, lib, p));
+        let start_moved = new_start.is_some_and(|p| p.dist(orig[0]) > 0.5);
+        let end_moved = new_end.is_some_and(|p| p.dist(orig[n - 1]) > 0.5);
+        if !start_moved && !end_moved {
+            return Self::route_is_tidy(orig).then(|| orig.clone());
+        }
+
+        // Other wires that end on the part we are about to change would be
+        // left hanging, so leave those cases to the router.
+        let foreign_ends: Vec<P> = proj
+            .wires
+            .iter()
+            .filter(|w| w.id != wire.id)
+            .flat_map(|w| [w.pts.first().copied(), w.pts.last().copied()])
+            .flatten()
+            .collect();
+        let touched = |from: usize, to: usize, skip: P| {
+            orig[from..=to].windows(2).any(|s| {
+                foreign_ends
+                    .iter()
+                    .any(|q| q.dist(skip) > 0.5 && Self::point_on_segment(*q, s[0], s[1]))
+            })
+        };
+        if n >= 3 {
+            if start_moved && touched(0, 2, orig[0]) {
+                return None;
+            }
+            if end_moved && touched(n - 3, n - 1, orig[n - 1]) {
+                return None;
+            }
+        } else if (start_moved && touched(0, 1, orig[0])) || (end_moved && touched(0, 1, orig[1])) {
+            return None;
+        }
+
+        let route = if n == 2 {
+            // A straight wire becomes one L, leaving the start pin along its axis.
+            let a = new_start.unwrap_or(orig[0]);
+            let b = new_end.unwrap_or(orig[1]);
+            let horizontal = match wire.start_pin {
+                Some(pin) => Self::pin_horizontal(proj, lib, pin),
+                None => (orig[1].x - orig[0].x).abs() >= (orig[1].y - orig[0].y).abs(),
+            };
+            let corner = if horizontal { P::new(b.x, a.y) } else { P::new(a.x, b.y) };
+            vec![a, corner, b]
+        } else {
+            let mut pts = orig.clone();
+            if let (true, Some(s)) = (start_moved, new_start) {
+                let horizontal = (orig[0].y - orig[1].y).abs() < 0.5;
+                pts[0] = s;
+                if horizontal {
+                    pts[1].y = s.y;
+                } else {
+                    pts[1].x = s.x;
+                }
+            }
+            if let (true, Some(e)) = (end_moved, new_end) {
+                let horizontal = (orig[n - 1].y - orig[n - 2].y).abs() < 0.5;
+                pts[n - 1] = e;
+                if horizontal {
+                    pts[n - 2].y = e.y;
+                } else {
+                    pts[n - 2].x = e.x;
+                }
+            }
+            pts
+        };
+        let route = Self::simplify_route(route);
+        let first_ok = new_start.map_or(true, |p| route[0].dist(p) < 0.5);
+        let last_ok = new_end.map_or(true, |p| route.last().is_some_and(|q| q.dist(p) < 0.5));
+        (first_ok && last_ok && Self::route_is_tidy(&route)).then_some(route)
+    }
+
     fn refresh_attached_wires(proj: &mut Project, lib: &Library, moved: &HashSet<u64>) {
         if moved.is_empty() {
             return;
         }
+        let obstacles = Self::component_obstacles(proj, lib);
         let plans: Vec<(u64, Vec<P>)> = proj
             .wires
             .iter()
@@ -970,6 +1089,14 @@ impl Schematic {
                 if !attached || w.pts.len() < 2 {
                     return None;
                 }
+                // Keep the wire's shape when it can simply stretch.
+                if let Some(route) = Self::stretch_wire(proj, lib, w) {
+                    if route.windows(2).all(|s| Self::segments_clear(s[0], s[1], &obstacles)) {
+                        return Some((w.id, route));
+                    }
+                }
+                // Otherwise route it again between its pins, keeping any
+                // junction where another wire ends on it.
                 let old = w.pts.clone();
                 let start_pin = w
                     .start_pin
@@ -979,26 +1106,12 @@ impl Schematic {
                     .end_pin
                     .and_then(|p| Self::pin_position(proj, lib, p))
                     .unwrap_or(*old.last().unwrap());
-                let start = w
-                    .start_pin
-                    .and_then(|p| Self::pin_stub(proj, lib, p))
-                    .unwrap_or(start_pin);
-                let end = w
-                    .end_pin
-                    .and_then(|p| Self::pin_stub(proj, lib, p))
-                    .unwrap_or(end_pin);
                 let horizontal = match w.start_pin {
                     Some(pin) => Self::pin_horizontal(proj, lib, pin),
                     None => (old[1].x - old[0].x).abs() >= (old[1].y - old[0].y).abs(),
                 };
                 let mut points = vec![start_pin];
-                if start.dist(start_pin) > 0.5 {
-                    points.push(start);
-                }
                 points.extend(Self::wire_junctions(proj, w.id, &old));
-                if end.dist(end_pin) > 0.5 {
-                    points.push(end);
-                }
                 points.push(end_pin);
                 Some((
                     w.id,
@@ -1041,6 +1154,9 @@ impl Schematic {
                         .unwrap_or(false);
                 if !attached || wire.pts.len() < 2 {
                     return None;
+                }
+                if let Some(route) = Self::stretch_wire(proj, lib, wire) {
+                    return Some((wire.id, route));
                 }
                 let start = wire
                     .start_pin
@@ -1101,26 +1217,12 @@ impl Schematic {
                 .end_pin
                 .and_then(|pin| Self::pin_position(proj, lib, pin))
                 .unwrap_or(*old.last().unwrap());
-            let start = wire
-                .start_pin
-                .and_then(|pin| Self::pin_stub(proj, lib, pin))
-                .unwrap_or(start_pin);
-            let end = wire
-                .end_pin
-                .and_then(|pin| Self::pin_stub(proj, lib, pin))
-                .unwrap_or(end_pin);
             let horizontal = wire
                 .start_pin
                 .map(|pin| Self::pin_horizontal(proj, lib, pin))
                 .unwrap_or_else(|| (old[1].x - old[0].x).abs() >= (old[1].y - old[0].y).abs());
             let mut anchors = vec![start_pin];
-            if start.dist(start_pin) > 0.5 {
-                anchors.push(start);
-            }
             anchors.extend(Self::wire_junctions(proj, id, &old));
-            if end.dist(end_pin) > 0.5 {
-                anchors.push(end);
-            }
             anchors.push(end_pin);
             let route = Self::route_anchored_skipping(proj, lib, &anchors, horizontal, Some(id));
             if route.len() >= 2 && route != old {
@@ -4197,5 +4299,96 @@ mod tests {
         for kind in ["endpoints", "diagonal", "zero-length", "reversal", "self-crossing", "through-part"] {
             assert_eq!(counts.get(kind).copied().unwrap_or(0), 0, "{kind}: {examples:?}");
         }
+    }
+
+    // ---- move quality harness ---------------------------------------
+
+    fn bends(route: &[P]) -> usize {
+        route.len().saturating_sub(2)
+    }
+
+    /// Wire a circuit, move one part by a grid-aligned offset the way a drag
+    /// release does, and report how the attached wires look afterwards.
+    fn move_report(circuits: u64) -> (usize, usize, usize, std::collections::BTreeMap<&'static str, usize>, Vec<String>) {
+        let lib = Library::builtin();
+        let (mut moved_wires, mut flagged, mut grew) = (0, 0, 0);
+        let mut counts = std::collections::BTreeMap::new();
+        let mut examples = Vec::new();
+        for seed in 1..=circuits {
+            let (mut proj, nets) = random_circuit(seed, &lib);
+            if seed % 2 == 0 {
+                wire_star(&mut proj, &lib, &nets);
+            } else {
+                Schematic::wire_nets(&mut proj, &lib, &nets);
+            }
+            if proj.comps.is_empty() {
+                continue;
+            }
+            let mut rng = seed.wrapping_mul(7919);
+            let k = (lcg(&mut rng) as usize) % proj.comps.len();
+            let id = proj.comps[k].id;
+            let (dx, dy) = (
+                ((lcg(&mut rng) % 33) as f32 - 16.0) * 25.0,
+                ((lcg(&mut rng) % 33) as f32 - 16.0) * 25.0,
+            );
+            let (nx, ny) = (proj.comps[k].x + dx, proj.comps[k].y + dy);
+            if proj.comps.iter().any(|c| c.id != id && (c.x - nx).abs() < 350.0 && (c.y - ny).abs() < 350.0) {
+                continue; // would land on another part
+            }
+            let before: HashMap<u64, Vec<P>> = proj.wires.iter().map(|w| (w.id, w.pts.clone())).collect();
+            {
+                let c = proj.comp_mut(id).unwrap();
+                c.x = nx;
+                c.y = ny;
+            }
+            let moved: HashSet<u64> = [id].into_iter().collect();
+            Schematic::refresh_attached_wires(&mut proj, &lib, &moved);
+            Schematic::repair_obstructed_wires(&mut proj, &lib);
+            let obstacles = Schematic::component_obstacles(&proj, &lib);
+            for w in &proj.wires {
+                let touches = w.start_pin.is_some_and(|p| p.0 == id) || w.end_pin.is_some_and(|p| p.0 == id);
+                let (Some(a), Some(b)) = (w.start_pin, w.end_pin) else { continue };
+                let (Some(sp), Some(ep)) = (proj.pin_pos(&lib, a.0, a.1), proj.pin_pos(&lib, b.0, b.1)) else { continue };
+                if !touches {
+                    continue;
+                }
+                moved_wires += 1;
+                let mut bad = route_defects(&w.pts, sp, ep, &obstacles);
+                bad.retain(|b| *b != "detour");
+                // Tiny jogs between two bends look like a glitch.
+                if w.pts.windows(2).enumerate().any(|(i, s)| i > 0 && i + 2 < w.pts.len() && s[0].dist(s[1]) < 30.0) {
+                    bad.push("tiny-jog");
+                }
+                if bends(&w.pts) > bends(&before[&w.id]) + 1 {
+                    grew += 1;
+                }
+                if !bad.is_empty() {
+                    flagged += 1;
+                    for b in &bad {
+                        *counts.entry(*b).or_insert(0) += 1;
+                    }
+                    if examples.len() < 4 {
+                        examples.push(format!("seed {seed} move ({dx},{dy}): {bad:?} {:?} was {:?}",
+                            w.pts.iter().map(|p| (p.x, p.y)).collect::<Vec<_>>(),
+                            before[&w.id].iter().map(|p| (p.x, p.y)).collect::<Vec<_>>()));
+                    }
+                }
+            }
+        }
+        (moved_wires, flagged, grew, counts, examples)
+    }
+
+    #[test]
+    fn move_quality_report() {
+        let (wires, flagged, grew, counts, examples) = move_report(900);
+        println!("MOVE wires {wires} flagged {flagged} gained-bends {grew} {counts:?}");
+        for e in &examples {
+            println!("MOVE e.g. {e}");
+        }
+        // Moving a part must stretch its wires, not scramble them.
+        for kind in ["endpoints", "diagonal", "zero-length", "reversal", "self-crossing", "through-part"] {
+            assert_eq!(counts.get(kind).copied().unwrap_or(0), 0, "{kind}: {examples:?}");
+        }
+        assert!(grew * 25 < wires, "{grew} of {wires} wires gained extra bends");
     }
 }
