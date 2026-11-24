@@ -59,13 +59,20 @@ fn draw(p: &egui::Painter, r: Rect, icon: Icon, ink: Color32) {
     };
     match icon {
         Icon::Select => {
-            // Arrow pointer: a filled head with a short tail.
+            // Arrow pointer in the classic shape: a head with a notch and a
+            // tail, filled in two convex pieces and outlined as one.
+            let q = |x: f32, y: f32| at(0.2 + x * 0.62, y);
+            p.add(Shape::convex_polygon(vec![q(0.0, 0.0), q(0.0, 0.86), q(1.0, 0.62)], ink, Stroke::NONE));
             p.add(Shape::convex_polygon(
-                vec![at(0.12, 0.0), at(0.12, 0.82), at(0.8, 0.58)],
+                vec![q(0.32, 0.70), q(0.52, 1.0), q(0.74, 0.92), q(0.5, 0.62)],
                 ink,
                 Stroke::NONE,
             ));
-            p.add(Shape::line(vec![at(0.42, 0.66), at(0.66, 1.0)], Stroke::new(2.6, ink)));
+            let outline = [(0.0, 0.0), (0.0, 0.86), (0.32, 0.70), (0.52, 1.0), (0.74, 0.92), (0.54, 0.64), (1.0, 0.62)];
+            p.add(Shape::closed_line(
+                outline.iter().map(|&(x, y)| q(x, y)).collect(),
+                Stroke::new(1.0, Color32::from_rgb(0x10, 0x14, 0x18)),
+            ));
         }
         Icon::Wire => {
             line(&[(0.0, 0.85), (0.4, 0.85), (0.4, 0.15), (1.0, 0.15)]);
