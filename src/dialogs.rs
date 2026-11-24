@@ -693,7 +693,7 @@ impl Dialogs {
                         "Left click in empty space - add a wire anchor",
                         "Right click on a wire    - anchor undo / context menu",
                         "Right click on a part    - Edit Properties, Rotate, Delete",
-                        "Left drag a wire segment - move just that segment",
+                        "Left drag a wire segment - slide just that stretch sideways",
                         "Double click a green pin - repeat the last aligned wire",
                         "Middle wheel             - zoom around the cursor",
                         "Middle click + move      - track pan, click to drop",

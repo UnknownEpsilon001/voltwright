@@ -123,6 +123,14 @@ enum Drag {
     ZoomBox {
         from: P,
     },
+    /// One straight stretch of a wire, slid sideways.
+    Segment {
+        wire: u64,
+        seg: usize,
+        start: P,
+        orig: Vec<P>,
+        horizontal: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -717,7 +725,16 @@ impl Schematic {
             },
             end,
         ]);
-        let mut candidates = vec![simple, other];
+        // A Z with its middle leg halfway between the pins, which suits two
+        // pins facing each other that sit a little out of line.
+        let mid_leg = if horizontal_first {
+            let mx = ((start.x + end.x) * 0.5 / 25.0).round() * 25.0;
+            vec![start, P::new(mx, start.y), P::new(mx, end.y), end]
+        } else {
+            let my = ((start.y + end.y) * 0.5 / 25.0).round() * 25.0;
+            vec![start, P::new(start.x, my), P::new(end.x, my), end]
+        };
+        let mut candidates = vec![simple, other, Self::simplify_route(mid_leg)];
         for &y in &[min_y, max_y] {
             candidates.push(Self::simplify_route(vec![
                 start,
@@ -1145,16 +1162,17 @@ impl Schematic {
                 if !attached || w.pts.len() < 2 {
                     return None;
                 }
-                // Keep the wire's shape when it can simply stretch.
-                if let Some(route) = Self::stretch_wire(proj, lib, w) {
+                // Keep the wire's shape when it can simply stretch, unless a
+                // fresh route is simpler: a wire that was once pulled into a
+                // U-shape should straighten when its ends line up again.
+                let stretched = Self::stretch_wire(proj, lib, w).filter(|route| {
                     let mut blockers = obstacles.clone();
-                    blockers.extend(Self::foreign_pin_squares(
-                        proj,
-                        lib,
-                        route[0],
-                        *route.last().unwrap(),
-                    ));
-                    if route.windows(2).all(|s| Self::segments_clear(s[0], s[1], &blockers)) {
+                    blockers.extend(Self::foreign_pin_squares(proj, lib, route[0], *route.last().unwrap()));
+                    route.windows(2).all(|s| Self::segments_clear(s[0], s[1], &blockers))
+                });
+                let has_junctions = !Self::wire_junctions(proj, w.id, &w.pts).is_empty();
+                if has_junctions {
+                    if let Some(route) = stretched.clone() {
                         return Some((w.id, route));
                     }
                 }
@@ -1176,9 +1194,13 @@ impl Schematic {
                 let mut points = vec![start_pin];
                 points.extend(Self::wire_junctions(proj, w.id, &old));
                 points.push(end_pin);
+                let fresh = Self::route_anchored_skipping(proj, lib, &points, horizontal, Some(w.id));
                 Some((
                     w.id,
-                    Self::route_anchored_skipping(proj, lib, &points, horizontal, Some(w.id)),
+                    match stretched {
+                        Some(route) if route.len() <= fresh.len() => route,
+                        _ => fresh,
+                    },
                 ))
             })
             .collect()
@@ -2003,11 +2025,27 @@ impl Schematic {
                     }
                     self.drag = Some(self.move_drag(proj, w));
                     self.hint = "Moving component".into();
-                } else if let Some((wid, _, _)) = Self::hit_wire(proj, w) {
+                } else if let Some((wid, seg, _)) = Self::hit_wire(proj, w) {
                     self.clear_selection();
                     self.sel_wire.insert(wid);
                     self.drag = None;
-                    self.hint = "Wire selected (movement locked)".into();
+                    let wire = proj.wires.iter().find(|x| x.id == wid);
+                    if let Some(wire) = wire.filter(|x| x.pts.len() > seg + 1) {
+                        let (a, b) = (wire.pts[seg], wire.pts[seg + 1]);
+                        let horizontal = (a.y - b.y).abs() < 0.5;
+                        let vertical = (a.x - b.x).abs() < 0.5;
+                        let joined = Self::wire_junctions(proj, wid, &wire.pts)
+                            .iter()
+                            .any(|j| Self::point_on_segment(*j, a, b));
+                        if (horizontal || vertical) && !joined {
+                            self.drag = Some(Drag::Segment { wire: wid, seg, start: w, orig: wire.pts.clone(), horizontal });
+                            self.hint = "Dragging a wire segment".into();
+                        } else if joined {
+                            self.hint = "Another wire is joined to this stretch; it cannot slide".into();
+                        } else {
+                            self.hint = "Only straight horizontal or vertical stretches slide".into();
+                        }
+                    }
                 } else {
                     if self.selected_count() == 0 {
                         self.click_select(proj, lib, raw, false);
@@ -2060,6 +2098,16 @@ impl Schematic {
                             }
                             if delta.x != 0.0 || delta.y != 0.0 {
                                 proj.dirty = true;
+                            }
+                        }
+                        Drag::Segment { wire, seg, start, orig, horizontal } => {
+                            let offset = if horizontal { cur.y - start.y } else { cur.x - start.x };
+                            let pts = Self::slide_segment(&orig, seg, offset, horizontal);
+                            if let Some(w) = proj.wires.iter_mut().find(|w| w.id == wire) {
+                                if w.pts != pts {
+                                    w.pts = pts;
+                                    proj.dirty = true;
+                                }
                             }
                         }
                         Drag::Box { .. } | Drag::ZoomBox { .. } => {}
@@ -2321,6 +2369,25 @@ impl Schematic {
             ids.insert(id);
             Self::remove_components(proj, lib, &ids);
         }
+    }
+
+    /// The wire `orig` with segment `seg` moved sideways by `offset`. A
+    /// segment that touches a pin gets short legs added so the pin stays put.
+    fn slide_segment(orig: &[P], seg: usize, offset: f32, horizontal: bool) -> Vec<P> {
+        let shift = if horizontal { P::new(0.0, offset) } else { P::new(offset, 0.0) };
+        let last = orig.len() - 2;
+        let (a, b) = (orig[seg], orig[seg + 1]);
+        let mut pts: Vec<P> = orig[..seg].to_vec();
+        if seg == 0 {
+            pts.push(a); // the first point stays on its pin
+        }
+        pts.push(a.add(shift));
+        pts.push(b.add(shift));
+        if seg == last {
+            pts.push(b); // the last point stays on its pin
+        }
+        pts.extend_from_slice(&orig[seg + 2..]);
+        Self::simplify_route(pts)
     }
 
     fn finish_bus(&mut self, proj: &mut Project) {
@@ -4942,6 +5009,43 @@ mod tests {
     fn sheets_sit_side_by_side() {
         assert_eq!(sheet_left(0), 0.0);
         assert_eq!(sheet_left(2), 2.0 * (SHEET_W + SHEET_GAP));
+    }
+
+    #[test]
+    fn sliding_a_segment_moves_only_that_stretch() {
+        let pts = vec![P::new(0.0, 0.0), P::new(100.0, 0.0), P::new(100.0, 100.0), P::new(300.0, 100.0)];
+        // Middle (vertical) segment slides right: its neighbours stretch.
+        let moved = Schematic::slide_segment(&pts, 1, 50.0, false);
+        assert_eq!(moved, vec![P::new(0.0, 0.0), P::new(150.0, 0.0), P::new(150.0, 100.0), P::new(300.0, 100.0)]);
+        // First segment slides down: the start point stays, a leg is added.
+        let first = Schematic::slide_segment(&pts, 0, 25.0, true);
+        assert_eq!(first[0], P::new(0.0, 0.0));
+        assert_eq!(first[1], P::new(0.0, 25.0));
+        assert!(first.windows(2).all(|w| (w[0].x - w[1].x).abs() < 0.5 || (w[0].y - w[1].y).abs() < 0.5), "{first:?}");
+        // Last segment slides up: the end point stays.
+        let end = Schematic::slide_segment(&pts, 2, -25.0, true);
+        assert_eq!(*end.last().unwrap(), P::new(300.0, 100.0));
+        // Not moving changes nothing.
+        assert_eq!(Schematic::slide_segment(&pts, 1, 0.0, false), pts);
+    }
+
+    #[test]
+    fn a_wire_pulled_into_a_u_straightens_when_the_ends_line_up() {
+        let lib = Library::builtin();
+        let mut proj = crate::examples::build("LED with current-limiting resistor", &lib).unwrap();
+        let r = proj.comps.iter().find(|c| c.refdes == "R1").unwrap().id;
+        let d = proj.comps.iter().find(|c| c.refdes == "D1").unwrap().id;
+        let wi = proj.wires.iter().position(|w| w.uses_component(r) && w.uses_component(d)).unwrap();
+        let (a, b) = (proj.wires[wi].pts[0], *proj.wires[wi].pts.last().unwrap());
+        // Pretend an earlier move left a deep U between the two pins.
+        let depth = 300.0;
+        proj.wires[wi].pts = vec![a, P::new(a.x, a.y + depth), P::new(b.x, a.y + depth), b];
+        let mut moved = HashSet::new();
+        moved.insert(d);
+        Schematic::refresh_attached_wires(&mut proj, &lib, &moved);
+        let pts = &proj.wires[wi].pts;
+        let length: f32 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
+        assert!(length < a.dist(b) * 1.5 + 100.0, "wire still detours: {pts:?}");
     }
 
     #[test]

@@ -35,7 +35,7 @@ It is early work. Expect rough edges and file-format changes.
   SR latch, D flip-flop divider, clickable logic inputs), plus a smoothing rectifier, inverting amplifier, series RLC
   resonance and common-emitter amplifier. AND, OR, XOR, NAND, NOR, XNOR, NOT and buffer gates are simulated
   as 5 V logic.
-- Schematic editing: mirror (M), rotate, copy/cut/paste with wires kept,
+- Schematic editing: drag one wire stretch sideways to tidy a wire, mirror (M), rotate, copy/cut/paste with wires kept,
   arrow-key nudge, a thick bus tool, net labels that count up (A0, A1, ...),
   several sheets side by side (View > Add sheet; nets join across sheets by
   label name), automatic annotation (Tools > Annotate), and an electrical
