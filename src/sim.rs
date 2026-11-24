@@ -82,23 +82,6 @@ impl Wave {
             Wave::Dc(_) => 0.0,
         }
     }
-    pub fn describe(&self) -> String {
-        match self {
-            Wave::Dc(v) => format!("{v} V DC"),
-            Wave::Sine { off, amp, freq } => format!("sine: {off} V + {amp} V @ {freq} Hz"),
-            Wave::Pulse {
-                lo,
-                hi,
-                td,
-                tr,
-                tf,
-                per,
-                ..
-            } => {
-                format!("pulse: {lo} V -> {hi} V, delay {td}s, {tr}s/{tf}s, period {per}s")
-            }
-        }
-    }
 }
 
 pub fn parse_wave(text: &str) -> (Wave, f64) {
@@ -1476,6 +1459,7 @@ impl CMatrix {
     }
 }
 
+#[allow(dead_code)] // phase is kept for plotting later
 pub struct AcPoint {
     pub freq: f64,
     pub mag: Vec<f64>,

@@ -21,7 +21,6 @@ pub const WIRE: Color32 = Color32::from_rgb(0x00, 0x9F, 0xE3);
 pub const WIRE_HOT: Color32 = Color32::from_rgb(0x46, 0xC2, 0xF1);
 pub const PIN: Color32 = Color32::from_rgb(0xC8, 0xC8, 0xC8);
 pub const BODY_GREEN: Color32 = Color32::from_rgb(0x2C, 0xA7, 0x37);
-pub const BODY_RED: Color32 = Color32::from_rgb(0xE6, 0x2C, 0x1F);
 pub const TEXT_DIM: Color32 = Color32::from_rgb(0x9A, 0xA8, 0xB5);
 pub const SELECTION: Color32 = Color32::from_rgb(0xFF, 0xD0, 0x20);
 pub const HOVER: Color32 = Color32::from_rgb(0x70, 0xD0, 0xFF);

@@ -551,6 +551,7 @@ impl AppState {
         self.sim = Some(stepped);
     }
 
+    #[cfg(test)]
     fn advance_simulation(&mut self, dt: f64) {
         let Some(sim) = self.sim.as_mut() else {
             return;

@@ -39,9 +39,9 @@ const WHEEL_POINTS_PER_LINE: f32 = 40.0;
 /// refuses a diagonal when no rectilinear route is clear.
 const WIRE_CLEARANCE: f32 = 12.0;
 const WIRE_BEND_COST: f32 = 8.0;
+#[cfg(test)]
 const WIRE_STUB: f32 = 16.0;
 const WIRE_ROUTE_MARGIN: f32 = 20.0;
-const WIRE_AVOID: f32 = 8.0;
 
 /// Pointer targets stay about this large on screen at every zoom level.  Grid
 /// snapping is applied to the result of a move, never to the point being hit.
@@ -107,9 +107,6 @@ impl View {
             (s.x - self.off.x) / self.zoom,
             (s.y - self.off.y) / self.zoom,
         )
-    }
-    pub fn len_to_screen(&self, v: f32) -> f32 {
-        v * self.zoom
     }
 }
 
@@ -567,16 +564,6 @@ impl Schematic {
             .unwrap_or(0)
     }
 
-    /// A short straight stub out of a pin keeps the first wire segment aligned
-    /// with the pin even when the next bend is far away.
-    fn pin_stub(proj: &Project, lib: &Library, pin: PinKey) -> Option<P> {
-        let p = Self::pin_position(proj, lib, pin)?;
-        let c = proj.comp(pin.0)?;
-        let pd = lib.get(&c.part)?.pins.get(pin.1)?;
-        let step = P::new(WIRE_STUB, 0.0).rot(pd.dir).rot(c.rot);
-        Some(p.add(step))
-    }
-
     fn point_on_segment(p: P, a: P, b: P) -> bool {
         const EPS: f32 = 0.5;
         if (a.y - b.y).abs() < EPS {
@@ -625,6 +612,7 @@ impl Schematic {
             .collect()
     }
 
+    #[cfg(test)]
     fn wire_segments(proj: &Project, skip: Option<u64>) -> Vec<(P, P)> {
         proj.wires
             .iter()
@@ -684,16 +672,6 @@ impl Schematic {
             && route
                 .windows(2)
                 .all(|seg| Self::overlap_length(seg[0], seg[1], wires) < 0.5)
-    }
-
-    fn orthogonal_route(
-        proj: &Project,
-        lib: &Library,
-        start: P,
-        end: P,
-        horizontal_first: bool,
-    ) -> Vec<P> {
-        Self::route_with_options(proj, lib, start, end, horizontal_first, None)
     }
 
     fn route_with_options(
@@ -3171,6 +3149,7 @@ fn wire_current_with_netlist(
         .unwrap_or(0.0)
 }
 
+#[cfg(test)]
 fn wire_current(proj: &Project, lib: &Library, wire: &Wire, sim: &Simulator) -> f64 {
     let netlist = proj.netlist(lib);
     wire_current_with_netlist(proj, wire, sim, Some(&netlist))
@@ -4020,7 +3999,7 @@ fn draw_component(
             let running = sim.filter(|sm| sm.running);
             let tap = running.and_then(|sm| sm.tap(&c.refdes).map(|t| (sm, t)));
             let (text, color) = match tap {
-                Some((sm, t)) if counter => (crate::util::si(t.frequency(), "Hz"), Color32::from_rgb(0x35, 0xF0, 0x68)),
+                Some((_sm, t)) if counter => (crate::util::si(t.frequency(), "Hz"), Color32::from_rgb(0x35, 0xF0, 0x68)),
                 Some((sm, t)) => {
                     if sm.v.get(t.node).copied().unwrap_or(0.0) > 2.5 {
                         ("H".to_string(), Color32::from_rgb(0xFF, 0x50, 0x40))

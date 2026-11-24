@@ -10,7 +10,6 @@ use eframe::egui::{
 use crate::bom;
 use crate::model::{Layer, Library, Project, P};
 use crate::pcb::absolute_pad;
-use crate::theme::*;
 
 fn library_part_row(
     ui: &mut egui::Ui,
@@ -79,7 +78,6 @@ pub struct Panels {
     pub category: String,
     pub selected_part: Option<String>,
     pub bom_filter: String,
-    pub log: String,
     pub notes_scroll: f32,
     pub editor: crate::editor::SourceEditor,
 }
@@ -95,7 +93,6 @@ impl Default for Panels {
             category: "All Categories".into(),
             selected_part: None,
             bom_filter: String::new(),
-            log: String::new(),
             notes_scroll: 0.0,
             editor: crate::editor::SourceEditor::default(),
         }

@@ -212,7 +212,6 @@ pub fn route(proj: &Project, par: &RouteParams) -> RouteResult {
         lone
     };
     let half_w = par.width * 0.5;
-    let track_block = half_w + par.clearance + half_w;
 
     // Board edge: keep the track clear of the outline.
     let edge = proj.rules.edge.max(par.clearance) + half_w;

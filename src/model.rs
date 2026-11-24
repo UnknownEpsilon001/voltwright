@@ -4,8 +4,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-pub const TH_PER_IN: f32 = 1000.0;
-pub const MM_PER_IN: f32 = 25.4;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct P {
@@ -161,12 +159,6 @@ pub struct PartDef {
     pub sim: SimKind,
     pub prefix: String,
     pub datasheet: String,
-}
-
-impl PartDef {
-    pub fn pin(&self, i: usize) -> Option<&PinDef> {
-        self.pins.get(i)
-    }
 }
 
 pub(crate) fn two_pin(
@@ -1616,6 +1608,7 @@ impl Component {
     pub fn pos(&self) -> P {
         P::new(self.x, self.y)
     }
+    #[cfg(test)]
     pub fn mirrored(&self) -> bool {
         self.rot.rem_euclid(720) >= 360
     }
@@ -1677,14 +1670,6 @@ pub struct Label {
     pub y: f32,
     pub rot: i32,
     pub probe: bool,
-}
-
-#[derive(Clone, Debug)]
-pub struct Pin {
-    pub comp: u64,
-    pub index: usize,
-    pub pos: P,
-    pub name: String,
 }
 
 // ---------------------------------------------------------------- pcb
@@ -1754,9 +1739,6 @@ impl Layer {
             Layer::Board,
             Layer::Drill,
         ]
-    }
-    pub fn copper(self) -> bool {
-        matches!(self, Layer::TopCopper | Layer::BottomCopper)
     }
 }
 
@@ -1895,6 +1877,7 @@ impl Netlist {
 // ---------------------------------------------------------------- project
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // read by tests and kept for the report
 pub struct DrcViolation {
     pub kind: String,
     pub pos: P,
@@ -1956,10 +1939,6 @@ impl Project {
         let id = self.next_id;
         self.next_id += 1;
         id
-    }
-
-    pub fn part<'a>(&self, lib: &'a Library, comp: &Component) -> Option<&'a PartDef> {
-        lib.get(&comp.part)
     }
 
     pub fn next_refdes(&self, prefix: &str) -> String {
