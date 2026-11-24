@@ -179,6 +179,8 @@ pub struct Schematic {
     pub sel_wire: HashSet<u64>,
     pub sel_label: HashSet<u64>,
     clip: Option<Clip>,
+    /// Where the electrical rules check found problems (point, is an error).
+    pub erc_marks: Vec<(P, bool)>,
     /// Anchors/vertices of the wire currently being placed.
     pub draft: Vec<P>,
     /// The pin the wire started on, if any.
@@ -239,6 +241,7 @@ impl Default for Schematic {
             sel_wire: HashSet::new(),
             sel_label: HashSet::new(),
             clip: None,
+            erc_marks: Vec::new(),
             draft: Vec::new(),
             draft_pin: None,
             wire_free: false,
@@ -2115,6 +2118,7 @@ impl Schematic {
         self.draw_junctions(&painter, proj);
         self.draw_components(&painter, proj, lib, sim);
         self.draw_labels(&painter, proj, sim);
+        self.draw_erc_marks(&painter);
         self.draw_pins(&painter, proj, lib, sim);
         self.draw_simulation_status(&painter, rect, sim);
 
@@ -2874,6 +2878,16 @@ impl Schematic {
                 lib,
                 self.switch_overrides.get(&c.refdes).copied(),
             );
+        }
+    }
+
+    /// Rings on the sheet where the rules check found something.
+    fn draw_erc_marks(&self, p: &egui::Painter) {
+        for (at, error) in &self.erc_marks {
+            let c = self.view.to_screen(*at);
+            let color = if *error { Color32::from_rgb(0xFF, 0x40, 0x40) } else { Color32::from_rgb(0xFF, 0xC0, 0x40) };
+            p.circle_stroke(c, 12.0, Stroke::new(2.0, color));
+            p.circle_stroke(c, 16.0, Stroke::new(1.0, color.gamma_multiply(0.5)));
         }
     }
 

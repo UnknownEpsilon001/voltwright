@@ -199,6 +199,7 @@ pub enum Dialog {
     Properties,
     PropertyAssign,
     SearchTag,
+    Erc,
 }
 
 impl Dialog {
@@ -217,6 +218,7 @@ impl Dialog {
             Dialog::Properties => "Edit Properties",
             Dialog::PropertyAssign => ui_text::PROPERTY_ASSIGN_TITLE,
             Dialog::SearchTag => ui_text::SEARCH_TAG_TITLE,
+            Dialog::Erc => "Electrical Rules Check",
         }
     }
 }
@@ -228,6 +230,9 @@ pub struct Dialogs {
     pub save_path: String,
     pub export_dir: String,
     pub gcode: crate::gcode::GcodeParams,
+    /// Results of the last electrical rules check; their positions are
+    /// marked on the schematic while they are listed.
+    pub erc: Vec<crate::erc::ErcIssue>,
     pub message: String,
     /// Search text and result for the P-key Pick Devices dialog.
     pub pick_search: String,
@@ -268,6 +273,7 @@ impl Default for Dialogs {
             save_path: ui_text::NEW_PROJECT_FILENAME.into(),
             export_dir: "exports".into(),
             gcode: crate::gcode::GcodeParams::default(),
+            erc: Vec::new(),
             message: String::new(),
             pick_search: String::new(),
             pick_selected: None,
@@ -622,6 +628,35 @@ impl Dialogs {
                     }
                     ui.add_space(8.0);
                     if ui.button("Close").clicked() {
+                        self.active = None;
+                    }
+                }
+                Dialog::Erc => {
+                    if ui.button("Check again").clicked() {
+                        self.erc = crate::erc::check(proj, lib);
+                    }
+                    let errors = self.erc.iter().filter(|i| i.severity == crate::erc::Severity::Error).count();
+                    let warnings = self.erc.len() - errors;
+                    if self.erc.is_empty() {
+                        ui.colored_label(OK, "No problems found.");
+                    } else {
+                        ui.label(format!("{errors} error(s), {warnings} warning(s). Each is marked on the sheet."));
+                    }
+                    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                        for issue in &self.erc {
+                            let (tag, color) = match issue.severity {
+                                crate::erc::Severity::Error => ("Error", ERR),
+                                crate::erc::Severity::Warning => ("Warning", Color32::from_rgb(0xFF, 0xC0, 0x40)),
+                            };
+                            ui.horizontal(|ui| {
+                                ui.colored_label(color, tag);
+                                ui.label(&issue.message);
+                            });
+                        }
+                    });
+                    ui.add_space(6.0);
+                    if ui.button("Close").clicked() {
+                        self.erc.clear();
                         self.active = None;
                     }
                 }

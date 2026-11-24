@@ -2,6 +2,7 @@
 mod autoroute;
 mod bom;
 mod dialogs;
+mod erc;
 mod editor;
 mod examples;
 mod gcode;
@@ -680,6 +681,11 @@ impl AppState {
             if ui.button("Autoroute PCB").clicked() {
                 self.autoroute_pcb();
                 self.set_tab(Tab::Pcb);
+            }
+            if ui.button("Electrical Rules Check").clicked() {
+                self.dialogs.erc = erc::check(&self.proj, &self.lib);
+                self.dialogs.open(Dialog::Erc);
+                self.status = format!("Electrical rules check: {} issue(s)", self.dialogs.erc.len());
             }
             if ui.button("Design Rule Check").clicked() {
                 let n = self.proj.drc().len();
@@ -1502,6 +1508,7 @@ impl eframe::App for AppState {
             });
 
         scope::show(&ctx, &mut self.scope, self.sim.as_ref());
+        self.schematic.erc_marks = self.dialogs.erc.iter().map(|i| (i.at, i.severity == erc::Severity::Error)).collect();
         if let Some(pid) = self.dialogs.pick_selected.take() {
             self.schematic.pending = Some(pid.clone());
             self.schematic.tool = schematic::Tool::Part;
