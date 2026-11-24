@@ -30,6 +30,7 @@ pub enum Wave {
         td: f64,
         tr: f64,
         tf: f64,
+        pw: f64,
         per: f64,
     },
 }
@@ -47,6 +48,7 @@ impl Wave {
                 td,
                 tr,
                 tf,
+                pw,
                 per,
             } => {
                 if t < *td {
@@ -55,11 +57,13 @@ impl Wave {
                 let ph = (t - *td) % *per;
                 if ph < *tr {
                     *lo + (*hi - *lo) * (ph / (*tr).max(1e-12))
-                } else if ph < *per - *tf {
+                } else if ph < *tr + *pw {
                     *hi
-                } else {
-                    let k = (ph - (*per - *tf)) / (*tf).max(1e-12);
+                } else if ph < *tr + *pw + *tf {
+                    let k = (ph - *tr - *pw) / (*tf).max(1e-12);
                     *hi + (*lo - *hi) * k.clamp(0.0, 1.0)
+                } else {
+                    *lo
                 }
             }
         }
@@ -89,6 +93,7 @@ impl Wave {
                 tr,
                 tf,
                 per,
+                ..
             } => {
                 format!("pulse: {lo} V -> {hi} V, delay {td}s, {tr}s/{tf}s, period {per}s")
             }
@@ -125,7 +130,14 @@ pub fn parse_wave(text: &str) -> (Wave, f64) {
         let td = nums.get(2).copied().unwrap_or(0.0);
         let tr = nums.get(3).copied().unwrap_or(1e-6).max(1e-12);
         let tf = nums.get(4).copied().unwrap_or(1e-6).max(1e-12);
-        let per = nums.get(5).copied().unwrap_or(1e-3).max(1e-12);
+        // PULSE(low high delay rise fall width period). With only six
+        // numbers the sixth is the period and the width is half of it.
+        let (pw, per) = if nums.len() >= 7 {
+            (nums[5].max(0.0), nums[6].max(1e-12))
+        } else {
+            let per = nums.get(5).copied().unwrap_or(1e-3).max(1e-12);
+            ((per * 0.5 - tr).max(0.0), per)
+        };
         return (
             Wave::Pulse {
                 lo,
@@ -133,6 +145,7 @@ pub fn parse_wave(text: &str) -> (Wave, f64) {
                 td,
                 tr,
                 tf,
+                pw,
                 per,
             },
             (hi - lo).abs(),
@@ -157,6 +170,47 @@ pub enum Kind {
     Lamp,
     /// 555 timer: pins GND, TRIG, OUT, RESET, CTRL, THRESH, DISCH, VCC.
     Timer,
+    /// Digital gate on 5 V logic: inputs first, output last.
+    Logic(Gate),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gate {
+    And,
+    Nand,
+    Or,
+    Nor,
+    Xor,
+    Xnor,
+    Not,
+    Buf,
+}
+
+impl Gate {
+    fn from_id(id: &str) -> Gate {
+        match id {
+            "NAND2" => Gate::Nand,
+            "OR2" => Gate::Or,
+            "NOR2" => Gate::Nor,
+            "XOR2" => Gate::Xor,
+            "XNOR2" => Gate::Xnor,
+            "NOT" => Gate::Not,
+            "BUF" => Gate::Buf,
+            _ => Gate::And,
+        }
+    }
+    fn eval(self, a: bool, b: bool) -> bool {
+        match self {
+            Gate::And => a && b,
+            Gate::Nand => !(a && b),
+            Gate::Or => a || b,
+            Gate::Nor => !(a || b),
+            Gate::Xor => a != b,
+            Gate::Xnor => a == b,
+            Gate::Not => !a,
+            Gate::Buf => a,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -237,6 +291,7 @@ impl Simulator {
                 SimKind::OpAmp => Kind::OpAmp,
                 SimKind::Lamp => Kind::Lamp,
                 SimKind::Timer => Kind::Timer,
+                SimKind::Logic => Kind::Logic(Gate::from_id(&def.id)),
                 SimKind::None => continue,
             };
             let value = match &kind {
@@ -395,7 +450,7 @@ impl Simulator {
         let vb = self.v.get(el.b()).copied().unwrap_or(0.0);
         match &el.kind {
             Kind::R | Kind::Lamp => (va - vb) / el.value.max(1e-9),
-            Kind::C | Kind::Timer => 0.0,
+            Kind::C | Kind::Timer | Kind::Logic(_) => 0.0,
             Kind::L | Kind::V { .. } | Kind::OpAmp => el
                 .branch
                 .and_then(|b| self.branch.get(b).copied())
@@ -571,13 +626,28 @@ impl Simulator {
         let (v, b) = solve(self, None, 0.0)?;
         self.v = v;
         self.branch = b;
+        // Gate outputs depend on their inputs; settle a few passes so a
+        // chain of gates starts in a consistent state.
+        if self.els.iter().any(|e| matches!(e.kind, Kind::Logic(_))) {
+            for e in &mut self.els {
+                if matches!(e.kind, Kind::Logic(_)) {
+                    e.latched = false;
+                }
+            }
+            for _ in 0..12 {
+                self.update_timers();
+                let (v, b) = solve(self, None, 0.0)?;
+                self.v = v;
+                self.branch = b;
+            }
+        }
         Ok(())
     }
 
     pub fn step(&mut self, dt: f64) -> Result<(), String> {
         // A timer switches on voltage thresholds, so advance in small sub-steps
         // to keep the blink period close to the real one.
-        if self.els.iter().any(|e| matches!(e.kind, Kind::Timer)) {
+        if self.els.iter().any(|e| matches!(e.kind, Kind::Timer | Kind::Logic(_))) {
             let n = ((dt / 0.002).ceil() as usize).clamp(1, 60);
             for _ in 0..n {
                 self.step_once(dt / n as f64)?;
@@ -593,7 +663,31 @@ impl Simulator {
     /// a low reset pin or a dead supply forces it low.
     fn update_timers(&mut self) {
         let v = self.v.clone();
+        // Gates are updated one after another and see each other's new output
+        // at once. That breaks the tie in a cross-coupled latch, which would
+        // otherwise flip both gates together forever.
+        let mut driven: HashMap<usize, bool> = self
+            .els
+            .iter()
+            .filter(|e| matches!(e.kind, Kind::Logic(_)))
+            .filter_map(|e| e.pins.last().map(|&n| (n, e.latched)))
+            .collect();
         for e in &mut self.els {
+            if let Kind::Logic(g) = e.kind {
+                let high = |i: usize| {
+                    let n = e.pins[i];
+                    driven.get(&n).copied().unwrap_or_else(|| v.get(n).copied().unwrap_or(0.0) > 2.5)
+                };
+                let n = e.pins.len();
+                if n >= 2 {
+                    let b = if n >= 3 { high(1) } else { false };
+                    e.latched = g.eval(high(0), b);
+                    if let Some(&out) = e.pins.last() {
+                        driven.insert(out, e.latched);
+                    }
+                }
+                continue;
+            }
             if !matches!(e.kind, Kind::Timer) || e.pins.len() < 8 {
                 continue;
             }
@@ -958,6 +1052,16 @@ fn solve(sim: &mut Simulator, dt: Option<f64>, t: f64) -> Result<(Vec<f64>, Vec<
                         stamp_g(&mut m, dis, gnd, g);
                     }
                 }
+                Kind::Logic(_) => {
+                    if let Some(&out) = e.pins.last() {
+                        // Output stage: 50 ohms to 5 V or to 0 V.
+                        let g = 0.02;
+                        stamp_g(&mut m, unknown(out), None, g);
+                        if e.latched {
+                            stamp_i(&mut m, None, unknown(out), g * 5.0);
+                        }
+                    }
+                }
                 Kind::OpAmp => {
                     let b = br.unwrap();
                     let out = e.pins.get(2).copied().unwrap_or(0);
@@ -1249,7 +1353,7 @@ pub fn ac_sweep(sim: &mut Simulator, f1: f64, f2: f64, decades: usize) -> Result
             let ub = unknown(e.b());
             let br = slots[ei];
             match &e.kind {
-                Kind::Timer => {}
+                Kind::Timer | Kind::Logic(_) => {}
                 Kind::R | Kind::Lamp => {
                     ccg(&mut m, ua, ub, C64::of(1.0 / e.value.max(1e-9)));
                 }

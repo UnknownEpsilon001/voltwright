@@ -181,6 +181,137 @@ const EXAMPLES: &[Example] = &[
         ],
     },
     Example {
+        name: "NAND gate truth table",
+        notes: "Input A toggles every second and B every two seconds, so the \
+                gate sees all four input pairs in turn. The LED lights unless \
+                both inputs are high. Press Run Simulation and watch D1.",
+        parts: &[
+            part("PULSE", "VA", "PULSE(0 5 0 1m 1m 1 2)", -500.0, 135.0, 90),
+            part("PULSE", "VB", "PULSE(0 5 0 1m 1m 2 4)", -300.0, 185.0, 90),
+            part("GND", "GND1", "0V", -500.0, 260.0, 0),
+            part("GND", "GND2", "0V", -300.0, 310.0, 0),
+            part("NAND2", "U1", "NAND2", 0.0, 100.0, 0),
+            part("RESISTOR", "R1", "330R", 250.0, 100.0, 0),
+            part("LED-GREEN", "D1", "LED-GREEN", 370.0, 160.0, 90),
+            part("GND", "GND3", "0V", 370.0, 280.0, 0),
+        ],
+        nets: &[
+            &[("VA", 0), ("U1", 0)],
+            &[("VB", 0), ("U1", 1)],
+            &[("VA", 1), ("GND1", 0)],
+            &[("VB", 1), ("GND2", 0)],
+            &[("U1", 2), ("R1", 0)],
+            &[("R1", 1), ("D1", 0)],
+            &[("D1", 1), ("GND3", 0)],
+        ],
+    },
+    Example {
+        name: "AND, OR and XOR gates",
+        notes: "The same two inputs feed an AND, an OR and an XOR gate. AND \
+                lights only when both inputs are high, OR when either is, and \
+                XOR when exactly one is.",
+        parts: &[
+            part("PULSE", "VA", "PULSE(0 5 0 1m 1m 1 2)", -600.0, 15.0, 90),
+            part("PULSE", "VB", "PULSE(0 5 0 1m 1m 2 4)", -450.0, 65.0, 90),
+            part("GND", "GND1", "0V", -600.0, 140.0, 0),
+            part("GND", "GND2", "0V", -450.0, 190.0, 0),
+            part("AND2", "U1", "AND2", -50.0, -150.0, 0),
+            part("OR2", "U2", "OR2", -50.0, 100.0, 0),
+            part("XOR2", "U3", "XOR2", -50.0, 350.0, 0),
+            part("RESISTOR", "R1", "330R", 200.0, -150.0, 0),
+            part("RESISTOR", "R2", "330R", 200.0, 100.0, 0),
+            part("RESISTOR", "R3", "330R", 200.0, 350.0, 0),
+            part("LED-RED", "D1", "LED-RED", 320.0, -90.0, 90),
+            part("LED-YELLOW", "D2", "LED-YELLOW", 320.0, 160.0, 90),
+            part("LED-GREEN", "D3", "LED-GREEN", 320.0, 410.0, 90),
+            part("GND", "GND3", "0V", 320.0, 10.0, 0),
+            part("GND", "GND4", "0V", 320.0, 260.0, 0),
+            part("GND", "GND5", "0V", 320.0, 510.0, 0),
+        ],
+        nets: &[
+            &[("VA", 0), ("U1", 0), ("U2", 0), ("U3", 0)],
+            &[("VB", 0), ("U1", 1), ("U2", 1), ("U3", 1)],
+            &[("VA", 1), ("GND1", 0)],
+            &[("VB", 1), ("GND2", 0)],
+            &[("U1", 2), ("R1", 0)],
+            &[("U2", 2), ("R2", 0)],
+            &[("U3", 2), ("R3", 0)],
+            &[("R1", 1), ("D1", 0)],
+            &[("R2", 1), ("D2", 0)],
+            &[("R3", 1), ("D3", 0)],
+            &[("D1", 1), ("GND3", 0)],
+            &[("D2", 1), ("GND4", 0)],
+            &[("D3", 1), ("GND5", 0)],
+        ],
+    },
+    Example {
+        name: "Half adder",
+        notes: "An XOR gate gives the sum bit and an AND gate gives the carry. \
+                Adding 1 + 1 lights only the carry LED: sum 0, carry 1 is \
+                binary 10, which is two.",
+        parts: &[
+            part("PULSE", "VA", "PULSE(0 5 0 1m 1m 1 2)", -600.0, 15.0, 90),
+            part("PULSE", "VB", "PULSE(0 5 0 1m 1m 2 4)", -450.0, 65.0, 90),
+            part("GND", "GND1", "0V", -600.0, 140.0, 0),
+            part("GND", "GND2", "0V", -450.0, 190.0, 0),
+            part("XOR2", "U1", "XOR2", -50.0, -125.0, 0),
+            part("AND2", "U2", "AND2", -50.0, 125.0, 0),
+            part("RESISTOR", "R1", "330R", 200.0, -125.0, 0),
+            part("RESISTOR", "R2", "330R", 200.0, 125.0, 0),
+            part("LED-GREEN", "D1", "SUM", 320.0, -65.0, 90),
+            part("LED-RED", "D2", "CARRY", 320.0, 185.0, 90),
+            part("GND", "GND3", "0V", 320.0, 35.0, 0),
+            part("GND", "GND4", "0V", 320.0, 285.0, 0),
+        ],
+        nets: &[
+            &[("VA", 0), ("U1", 0), ("U2", 0)],
+            &[("VB", 0), ("U1", 1), ("U2", 1)],
+            &[("VA", 1), ("GND1", 0)],
+            &[("VB", 1), ("GND2", 0)],
+            &[("U1", 2), ("R1", 0)],
+            &[("U2", 2), ("R2", 0)],
+            &[("R1", 1), ("D1", 0)],
+            &[("R2", 1), ("D2", 0)],
+            &[("D1", 1), ("GND3", 0)],
+            &[("D2", 1), ("GND4", 0)],
+        ],
+    },
+    Example {
+        name: "SR latch from NOR gates",
+        notes: "Two cross-coupled NOR gates remember one bit. A pulse on S \
+                sets Q high and a later pulse on R clears it; between pulses \
+                the latch holds its state.",
+        parts: &[
+            part("PULSE", "VR", "PULSE(0 5 4 1m 1m 0.5 6)", -450.0, -65.0, 90),
+            part("PULSE", "VS", "PULSE(0 5 1 1m 1m 0.5 6)", -450.0, 235.0, 90),
+            part("GND", "GND1", "0V", -450.0, 60.0, 0),
+            part("GND", "GND2", "0V", -450.0, 360.0, 0),
+            // U2 comes first so it settles first and the latch starts with Q low.
+            part("NOR2", "U2", "NOR2", 0.0, 150.0, 0),
+            part("NOR2", "U1", "NOR2", 0.0, -100.0, 0),
+            part("RESISTOR", "R1", "330R", 250.0, -100.0, 0),
+            part("RESISTOR", "R2", "330R", 250.0, 150.0, 0),
+            part("LED-GREEN", "D1", "Q", 370.0, -40.0, 90),
+            part("LED-RED", "D2", "QBAR", 370.0, 210.0, 90),
+            part("GND", "GND3", "0V", 370.0, 80.0, 0),
+            part("GND", "GND4", "0V", 370.0, 330.0, 0),
+        ],
+        nets: &[
+            &[("VR", 0), ("U1", 0)],
+            &[("VS", 0), ("U2", 0)],
+            &[("VR", 1), ("GND1", 0)],
+            &[("VS", 1), ("GND2", 0)],
+            &[("U1", 2), ("U2", 1)],
+            &[("U2", 2), ("U1", 1)],
+            &[("U1", 2), ("R1", 0)],
+            &[("U2", 2), ("R2", 0)],
+            &[("R1", 1), ("D1", 0)],
+            &[("R2", 1), ("D2", 0)],
+            &[("D1", 1), ("GND3", 0)],
+            &[("D2", 1), ("GND4", 0)],
+        ],
+    },
+    Example {
         name: "Op-amp voltage follower",
         notes: "The output is wired straight back to the inverting input, so \
                 U1 copies the 2 V input with unity gain and can drive the \
@@ -328,6 +459,62 @@ mod tests {
         }
         assert!(on > 20 && off > 20, "LED was on {on} and off {off} steps");
         assert!(flips >= 6, "expected several blinks in 8 s, got {flips} changes");
+    }
+
+    #[test]
+    fn gate_examples_follow_their_truth_tables() {
+        let lib = Library::builtin();
+        // Inputs by one-second window: (A, B) = (1,1), (0,1), (1,0), (0,0).
+        let cases: [(&str, &[(&str, [bool; 4])]); 3] = [
+            ("NAND gate truth table", &[("D1", [false, true, true, true])]),
+            (
+                "AND, OR and XOR gates",
+                &[
+                    ("D1", [true, false, false, false]),
+                    ("D2", [true, true, true, false]),
+                    ("D3", [false, true, true, false]),
+                ],
+            ),
+            ("Half adder", &[("D1", [false, true, true, false]), ("D2", [true, false, false, false])]),
+        ];
+        for (name, leds) in cases {
+            let proj = build(name, &lib).unwrap();
+            let mut sim = Simulator::from_project(&proj, &lib).unwrap();
+            sim.solve_dc().unwrap();
+            let mut seen = vec![[false; 4]; leds.len()];
+            for step in 0..80 {
+                sim.step(0.05).unwrap();
+                // sample the middle of each one-second window (B changes every 2 s)
+                if step % 20 == 9 {
+                    let k = step / 20;
+                    for (i, (led, _)) in leds.iter().enumerate() {
+                        seen[i][k] = sim.led_level(led) > 0.05;
+                    }
+                }
+            }
+            for (i, (led, want)) in leds.iter().enumerate() {
+                assert_eq!(&seen[i][..4], want, "{name}: {led}");
+            }
+        }
+    }
+
+    #[test]
+    fn sr_latch_sets_holds_and_resets() {
+        let lib = Library::builtin();
+        let proj = build("SR latch from NOR gates", &lib).unwrap();
+        let mut sim = Simulator::from_project(&proj, &lib).unwrap();
+        sim.solve_dc().unwrap();
+        let mut at = |t: f64| {
+            while sim.t < t {
+                sim.step(0.05).unwrap();
+            }
+            sim.led_level("D1") > 0.05
+        };
+        assert!(!at(0.9), "Q starts low");
+        assert!(at(1.3), "S pulse sets Q");
+        assert!(at(3.0), "Q is held between pulses");
+        assert!(!at(4.3), "R pulse clears Q");
+        assert!(!at(5.5), "Q stays low");
     }
 
     #[test]

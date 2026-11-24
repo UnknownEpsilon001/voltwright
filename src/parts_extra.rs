@@ -112,6 +112,27 @@ fn transistor(
 }
 
 pub fn add_all(p: &mut Vec<PartDef>) {
+    // ---- Logic gates (simulated, 5 V logic, no supply pins) ------------
+    for (id, name) in [
+        ("AND2", "2-INPUT AND GATE"),
+        ("NAND2", "2-INPUT NAND GATE"),
+        ("OR2", "2-INPUT OR GATE"),
+        ("NOR2", "2-INPUT NOR GATE"),
+        ("XOR2", "2-INPUT XOR GATE"),
+        ("XNOR2", "2-INPUT XNOR GATE"),
+        ("NOT", "INVERTER"),
+        ("BUF", "BUFFER"),
+    ] {
+        let mut g = two_pin(id, name, "Logic Gates", "DEVICE", "DIL-14", Symbol::Gate, SimKind::Logic, id, "U");
+        let pin = |n: &str, x: f32, y: f32, dir: i32| PinDef { name: n.into(), pos: P::new(x, y), dir };
+        g.pins = if id == "NOT" || id == "BUF" {
+            vec![pin("A", -90.0, 0.0, 180), pin("Y", 90.0, 0.0, 0)]
+        } else {
+            vec![pin("A", -90.0, -25.0, 180), pin("B", -90.0, 25.0, 180), pin("Y", 90.0, 0.0, 0)]
+        };
+        add(p, g);
+    }
+
     use SimKind::D;
     use Symbol::{Diode, Led, Speaker};
 

@@ -30,8 +30,10 @@ It is early work. Expect rough edges and file-format changes.
   the simulation.
 - Built-in example circuits (Examples menu or the Home page): LED, voltage
   divider, transistor switch, RC charging, op-amp amplifier, diode
-  rectifier, 555 timer LED blinker, op-amp voltage follower and RC low-pass
-  filter.
+  rectifier, 555 timer LED blinker, op-amp voltage follower, RC low-pass
+  filter, and logic gate circuits (NAND truth table, AND/OR/XOR, half adder,
+  SR latch). AND, OR, XOR, NAND, NOR, XNOR, NOT and buffer gates are simulated
+  as 5 V logic.
 - Import of `.pdsprj` projects. Voltwright brings across the parts it has
   models for, rebuilds the nets and reroutes the wires; it lists anything it
   had to skip.

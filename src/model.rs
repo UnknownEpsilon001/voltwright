@@ -93,6 +93,7 @@ pub enum Symbol {
     Nmos,
     Pmos,
     OpAmp,
+    Gate,
     Ground,
     Rail,
     Switch,
@@ -126,6 +127,7 @@ pub enum SimKind {
     OpAmp,
     Lamp,
     Timer,
+    Logic,
 }
 
 #[derive(Clone, Debug)]

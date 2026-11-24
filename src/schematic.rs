@@ -3254,17 +3254,13 @@ fn draw_component(
                 Color32::from_rgb(0xFF, 0x38, 0x28)
             };
             if def.symbol == Symbol::Led && lit > 0.01 {
-                let clock = p.ctx().input(|i| i.time);
-                let pulse = sim
-                    .map(|_| 0.88 + 0.12 * ((clock * 9.0) % std::f64::consts::TAU).sin() as f32)
-                    .unwrap_or(1.0);
                 let center = s(P::ZERO);
                 // Three soft rings and a hot core, so a lit LED is obvious
                 // even when the whole sheet is zoomed out.
                 for (radius, base, gain) in [(96.0, 18.0, 28.0), (62.0, 34.0, 50.0), (38.0, 56.0, 60.0)] {
                     p.circle_filled(
                         center,
-                        radius * v.zoom.max(0.4) * pulse,
+                        radius * v.zoom.max(0.4),
                         Color32::from_rgba_premultiplied(
                             led_color.r(),
                             led_color.g(),
@@ -3437,6 +3433,64 @@ fn draw_component(
                 ink,
                 Stroke::NONE,
             ));
+        }
+        Symbol::Gate => {
+            let id = def.id.as_str();
+            let inverted = matches!(id, "NAND2" | "NOR2" | "XNOR2" | "NOT");
+            let sample = |f: &dyn Fn(f32) -> P| -> Vec<Pos2> { (0..=16).map(|i| s(f(i as f32 / 16.0))).collect() };
+            let quad = |a: P, c: P, b: P| {
+                move |t: f32| {
+                    let u = 1.0 - t;
+                    P::new(u * u * a.x + 2.0 * u * t * c.x + t * t * b.x, u * u * a.y + 2.0 * u * t * c.y + t * t * b.y)
+                }
+            };
+            let stroke = Stroke::new(1.8, ink);
+            let mut tip = 45.0f32;
+            let mut back = -60.0f32;
+            match id {
+                "AND2" | "NAND2" => {
+                    let mut pts = vec![s(P::new(-60.0, -45.0)), s(P::new(0.0, -45.0))];
+                    for i in 1..16 {
+                        let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / 16.0;
+                        pts.push(s(P::new(45.0 * a.cos(), 45.0 * a.sin())));
+                    }
+                    pts.extend([s(P::new(0.0, 45.0)), s(P::new(-60.0, 45.0))]);
+                    p.add(Shape::closed_line(pts, stroke));
+                }
+                "NOT" | "BUF" => {
+                    tip = 40.0;
+                    back = -45.0;
+                    p.add(Shape::closed_line(vec![s(P::new(-45.0, -35.0)), s(P::new(40.0, 0.0)), s(P::new(-45.0, 35.0))], stroke));
+                }
+                _ => {
+                    // OR family: concave back, two curved sides meeting at the tip.
+                    tip = 52.0;
+                    back = -51.0;
+                    let mut pts = sample(&quad(P::new(-60.0, -45.0), P::new(0.0, -45.0), P::new(tip, 0.0)));
+                    let mut low = sample(&quad(P::new(tip, 0.0), P::new(0.0, 45.0), P::new(-60.0, 45.0)));
+                    pts.append(&mut low);
+                    let bk = sample(&quad(P::new(-60.0, 45.0), P::new(-35.0, 0.0), P::new(-60.0, -45.0)));
+                    pts.extend(bk);
+                    p.add(Shape::line(pts, stroke));
+                    if matches!(id, "XOR2" | "XNOR2") {
+                        back = -61.0;
+                        let x = sample(&quad(P::new(-72.0, 45.0), P::new(-47.0, 0.0), P::new(-72.0, -45.0)));
+                        p.add(Shape::line(x, stroke));
+                    }
+                }
+            }
+            if inverted {
+                p.add(Shape::circle_stroke(s(P::new(tip + 6.0, 0.0)), 6.0 * v.zoom, stroke));
+                tip += 12.0;
+            }
+            line(p, s(P::new(tip, 0.0)), s(P::new(90.0, 0.0)), ink, thin);
+            if matches!(id, "NOT" | "BUF") {
+                line(p, s(P::new(-90.0, 0.0)), s(P::new(back, 0.0)), ink, thin);
+            } else {
+                for y in [-25.0f32, 25.0] {
+                    line(p, s(P::new(-90.0, y)), s(P::new(back, y)), ink, thin);
+                }
+            }
         }
         Symbol::OpAmp => {
             let tri = vec![
