@@ -371,11 +371,16 @@ pub fn save(proj: &Project, path: &Path) -> Result<String, String> {
                 c.x,
                 c.y,
                 c.rot,
-                props_text(c),
+                // The property list uses | and ; itself, so it is escaped as one field.
+                esc(&props_text(c)),
                 hidden_props_text(c),
                 text_size_text(c)
             ),
         );
+    }
+    field(&mut out, "sheets", proj.sheets.to_string());
+    for b in &proj.buses {
+        field(&mut out, "bus", format!("{}|{}", b.id, points_text(&b.pts)));
     }
     for w in &proj.wires {
         field(
@@ -419,7 +424,8 @@ pub fn save(proj: &Project, path: &Path) -> Result<String, String> {
                 f.x,
                 f.y,
                 f.rot,
-                pads_text(f)
+                // Pad lists use | and ; themselves, so escape them as one field.
+                esc(&pads_text(f))
             ),
         );
     }
@@ -436,7 +442,7 @@ pub fn save(proj: &Project, path: &Path) -> Result<String, String> {
                 t.b.y,
                 t.width,
                 layer_index(t.layer),
-                t.net.clone().unwrap_or_default()
+                esc(&t.net.clone().unwrap_or_default())
             ),
         );
     }
@@ -451,7 +457,7 @@ pub fn save(proj: &Project, path: &Path) -> Result<String, String> {
                 v.pos.y,
                 v.size,
                 v.drill,
-                v.net.clone().unwrap_or_default()
+                esc(&v.net.clone().unwrap_or_default())
             ),
         );
     }
@@ -547,10 +553,19 @@ pub fn open(path: &Path) -> Result<Project, String> {
                     x: f32v(&p[4])?,
                     y: f32v(&p[5])?,
                     rot: f32v(&p[6])? as i32,
-                    props: parse_props(&p[7]),
+                    props: parse_props(&unesc(&p[7])),
                     hidden_props: p.get(8).map(|s| parse_hidden_props(s)).unwrap_or_default(),
                     text_size: p.get(9).map(|s| parse_text_size(s)).transpose()?.flatten(),
                 });
+            }
+            "sheets" => {
+                proj.sheets = p.first().and_then(|s| s.trim().parse::<usize>().ok()).unwrap_or(1).clamp(1, 64);
+            }
+            "bus" => {
+                if p.len() != 2 {
+                    return Err("bad bus".into());
+                }
+                proj.buses.push(crate::model::Bus { id: u64v(&p[0])?, pts: parse_points(&p[1]) });
             }
             "wire" => {
                 if p.len() != 2 && p.len() != 4 {
@@ -589,11 +604,11 @@ pub fn open(path: &Path) -> Result<Project, String> {
                     x: f32v(&p[4])?,
                     y: f32v(&p[5])?,
                     rot: f32v(&p[6])? as i32,
-                    pads: parse_pads(&p[7]),
+                    pads: parse_pads(&unesc(&p[7])),
                 });
             }
             "track" => {
-                if p.len() != 8 {
+                if p.len() < 6 {
                     return Err("bad track".into());
                 }
                 proj.tracks.push(Track {
@@ -606,7 +621,7 @@ pub fn open(path: &Path) -> Result<Project, String> {
                 });
             }
             "via" => {
-                if p.len() != 6 {
+                if p.len() < 5 {
                     return Err("bad via".into());
                 }
                 proj.vias.push(Via {
@@ -646,4 +661,91 @@ pub fn default_path(proj: &Project) -> std::path::PathBuf {
         name
     };
     std::path::PathBuf::from(format!("{name}{}", ui_text::PROJECT_EXTENSION))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Bus, Library, P};
+
+    #[test]
+    fn sheets_buses_and_mirrored_parts_survive_save_and_open() {
+        let lib = Library::builtin();
+        let mut proj = crate::examples::build("NAND gate truth table", &lib).unwrap();
+        proj.sheets = 3;
+        proj.buses.push(Bus { id: 900, pts: vec![P::new(100.0, 200.0), P::new(700.0, 200.0), P::new(700.0, 500.0)] });
+        let id = proj.comps.iter().find(|c| c.refdes == "U1").unwrap().id;
+        proj.comp_mut(id).unwrap().rot = 450; // mirrored, turned 90 degrees
+        let dir = std::env::temp_dir().join("voltwright_io_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("roundtrip.volt");
+        save(&proj, &path).unwrap();
+        let back = open(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(back.sheets, 3);
+        assert_eq!(back.buses.len(), 1);
+        assert_eq!(back.buses[0].pts.len(), 3);
+        assert_eq!(back.comp(id).unwrap().rot, 450);
+        assert!(back.comp(id).unwrap().mirrored());
+    }
+
+    #[test]
+    fn every_example_survives_save_and_open_including_the_pcb() {
+        let lib = Library::builtin();
+        let dir = std::env::temp_dir().join("voltwright_io_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in crate::examples::names() {
+            let mut proj = crate::examples::build(name, &lib).unwrap();
+            let nl = proj.netlist(&lib);
+            proj.sync_pcb(&lib, &nl);
+            let path = dir.join("example.volt");
+            save(&proj, &path).unwrap();
+            let back = open(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let _ = std::fs::remove_file(&path);
+            assert_eq!(back.comps.len(), proj.comps.len(), "{name}");
+            assert_eq!(back.wires.len(), proj.wires.len(), "{name}");
+            assert_eq!(back.fps.len(), proj.fps.len(), "{name}");
+            for (a, b) in proj.comps.iter().zip(&back.comps) {
+                assert_eq!((&a.refdes, &a.value, &a.props), (&b.refdes, &b.value, &b.props), "{name}");
+            }
+            assert_eq!(back.netlist(&lib).names.len(), proj.netlist(&lib).names.len(), "{name}: nets");
+        }
+    }
+
+    #[test]
+    fn routed_tracks_and_vias_survive_save_and_open() {
+        let lib = Library::builtin();
+        let mut proj = crate::examples::build("Transistor switch with lamp", &lib).unwrap();
+        let nl = proj.netlist(&lib);
+        proj.sync_pcb(&lib, &nl);
+        let (o, e) = (P::new(0.0, 0.0), P::new(3000.0, 2500.0));
+        proj.board.origin = o;
+        proj.board.width = e.x;
+        proj.board.height = e.y;
+        for (i, f) in proj.fps.iter_mut().enumerate() {
+            f.x = 400.0 + 450.0 * (i % 4) as f32;
+            f.y = 500.0 + 400.0 * (i / 4) as f32;
+        }
+        let res = crate::autoroute::route(&proj, &crate::autoroute::RouteParams::default());
+        assert!(res.routed > 0);
+        for mut t in res.tracks {
+            t.id = proj.alloc_id();
+            proj.tracks.push(t);
+        }
+        for mut v in res.vias {
+            v.id = proj.alloc_id();
+            proj.vias.push(v);
+        }
+        let dir = std::env::temp_dir().join("voltwright_io_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("routed.volt");
+        save(&proj, &path).unwrap();
+        let back = open(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(back.tracks.len(), proj.tracks.len());
+        assert_eq!(back.vias.len(), proj.vias.len());
+        assert_eq!(back.tracks[0].net, proj.tracks[0].net);
+        assert_eq!(back.fps[0].pads[0].net, proj.fps[0].pads[0].net);
+        assert!(back.drc().len() == proj.drc().len());
+    }
 }

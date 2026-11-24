@@ -10,13 +10,20 @@ use eframe::egui::{
     StrokeKind, Vec2,
 };
 
-use crate::model::{Component, Label, LabelKind, Library, Netlist, Project, Symbol, Wire, P};
+use crate::model::{Bus, Component, Label, LabelKind, Library, Netlist, Project, Symbol, Wire, P};
 use crate::sim::Simulator;
 use crate::theme::*;
 use crate::util::line_distance;
 
 pub const SHEET_W: f32 = 1600.0;
 pub const SHEET_H: f32 = 1200.0;
+/// Gap between neighbouring sheet frames.
+pub const SHEET_GAP: f32 = 100.0;
+
+/// Left edge of sheet `i` (counting from 0).
+pub fn sheet_left(i: usize) -> f32 {
+    i as f32 * (SHEET_W + SHEET_GAP)
+}
 
 /// Zoom limits. The old 0.04 floor made the grid draw tens of thousands of
 /// dots per frame at full zoom-out; 0.08 keeps the whole sheet usable.
@@ -57,6 +64,7 @@ pub enum Tool {
     Label,
     Text,
     Probe,
+    Bus,
     Delete,
 }
 
@@ -69,6 +77,7 @@ impl Tool {
             Tool::Label => "Net Label",
             Tool::Text => "Text",
             Tool::Probe => "Voltage Probe",
+            Tool::Bus => "Bus",
             Tool::Delete => "Delete",
         }
     }
@@ -179,6 +188,13 @@ pub struct Schematic {
     pub sel_wire: HashSet<u64>,
     pub sel_label: HashSet<u64>,
     clip: Option<Clip>,
+    bus_draft: Vec<P>,
+    sheet_count: usize,
+    pub current_sheet: usize,
+    /// Sheet to show on the next paint (set by the View menu).
+    pub pending_sheet: Option<usize>,
+    /// The label text to offer next, once a label ending in a number is placed.
+    pub next_label: Option<String>,
     /// Where the electrical rules check found problems (point, is an error).
     pub erc_marks: Vec<(P, bool)>,
     /// Anchors/vertices of the wire currently being placed.
@@ -241,6 +257,11 @@ impl Default for Schematic {
             sel_wire: HashSet::new(),
             sel_label: HashSet::new(),
             clip: None,
+            bus_draft: Vec::new(),
+            sheet_count: 1,
+            current_sheet: 0,
+            pending_sheet: None,
+            next_label: None,
             erc_marks: Vec::new(),
             draft: Vec::new(),
             draft_pin: None,
@@ -1351,8 +1372,9 @@ impl Schematic {
             .min(rect.height() / (SHEET_H + 80.0))
             .clamp(ZOOM_MIN, ZOOM_MAX);
         self.view.zoom = zoom;
+        let left = sheet_left(self.current_sheet);
         self.view.off = Vec2::new(
-            rect.center().x - SHEET_W * 0.5 * zoom,
+            rect.center().x - (left + SHEET_W * 0.5) * zoom,
             rect.center().y - SHEET_H * 0.5 * zoom,
         );
     }
@@ -1364,7 +1386,7 @@ impl Schematic {
         const VISIBLE_EDGE: f32 = 24.0;
         let sheet = Rect::from_two_pos(
             self.view.to_screen(P::new(0.0, 0.0)),
-            self.view.to_screen(P::new(SHEET_W, SHEET_H)),
+            self.view.to_screen(P::new(sheet_left(self.sheet_count.saturating_sub(1)) + SHEET_W, SHEET_H)),
         );
 
         if sheet.right() < rect.left() + VISIBLE_EDGE {
@@ -1476,6 +1498,10 @@ impl Schematic {
     ) -> String {
         let desired = ui.available_size_before_wrap();
         let (rect, resp) = ui.allocate_exact_size(desired, Sense::click_and_drag());
+        if let Some(i) = self.pending_sheet.take() {
+            self.current_sheet = i.min(proj.sheets.max(1) - 1);
+            self.zoom_to_fit(rect);
+        }
         if rect.width() < 10.0 || rect.height() < 10.0 {
             return self.hint.clone();
         }
@@ -1654,7 +1680,10 @@ impl Schematic {
             }
         });
 
-        if esc {
+        if esc && !self.bus_draft.is_empty() {
+            self.bus_draft.clear();
+            self.hint = "Bus cancelled".into();
+        } else if esc {
             if !self.draft.is_empty() {
                 self.draft.clear();
                 self.draft_pin = None;
@@ -1674,6 +1703,9 @@ impl Schematic {
             }
             self.drag = None;
             self.drag_wire_paths.clear();
+        }
+        if edit && !self.bus_draft.is_empty() {
+            self.finish_bus(proj);
         }
         if mirror_key && self.pending.is_some() {
             self.pending_rot = crate::model::rot_mirror(self.pending_rot);
@@ -1891,7 +1923,20 @@ impl Schematic {
                                 probe,
                             });
                             proj.dirty = true;
+                            self.next_label = increment_label(text.trim());
                             self.hint = format!("Added label {}", text.trim());
+                        }
+                        Tool::Bus => {
+                            let at = match self.bus_draft.last() {
+                                // Keep the line square: add a corner when needed.
+                                Some(last) if (last.x - w.x).abs() > 0.5 && (last.y - w.y).abs() > 0.5 => {
+                                    self.bus_draft.push(P::new(w.x, last.y));
+                                    w
+                                }
+                                _ => w,
+                            };
+                            self.bus_draft.push(at);
+                            self.hint = "Bus: click to add points, right click or Enter to finish".into();
                         }
                         Tool::Delete => {
                             Self::delete_at(proj, lib, w);
@@ -1928,7 +1973,9 @@ impl Schematic {
             }
         }
 
-        if resp.secondary_clicked() && !self.pan_mode {
+        if resp.secondary_clicked() && !self.pan_mode && !self.bus_draft.is_empty() {
+            self.finish_bus(proj);
+        } else if resp.secondary_clicked() && !self.pan_mode {
             if wire_active {
                 // Terminate Wire: finish on the target pin, wire or cursor.
                 let same_start = self
@@ -2096,7 +2143,7 @@ impl Schematic {
         }
         // Right-click context menu. Wiring and placement consume the right
         // click, so they must not also open the menu in the same frame.
-        if !wire_active && !placement_active {
+        if !wire_active && !placement_active && self.bus_draft.is_empty() {
             // The menu belongs to whatever was under the pointer when it was
             // opened, not to whatever the pointer passes over afterwards.
             if resp.secondary_clicked() {
@@ -2111,7 +2158,10 @@ impl Schematic {
         // ---- drawing
         self.keep_sheet_reachable(rect);
         let sim = sim.as_deref();
-        self.draw_sheet(&painter, rect);
+        self.sheet_count = proj.sheets.max(1);
+        self.current_sheet = ((self.mouse.x / (SHEET_W + SHEET_GAP)).floor().max(0.0) as usize).min(self.sheet_count - 1);
+        self.draw_sheet(&painter, rect, self.sheet_count);
+        self.draw_buses(&painter, proj);
         self.draw_grid(&painter, rect, proj);
         self.draw_cursor_overlays(&painter, rect);
         self.draw_wires(&painter, proj, lib, sim);
@@ -2271,6 +2321,11 @@ impl Schematic {
             proj.dirty = true;
             return;
         }
+        if let Some(i) = proj.buses.iter().position(|b| b.pts.windows(2).any(|s| crate::model::point_seg_dist(w, s[0], s[1]) < 16.0)) {
+            proj.buses.remove(i);
+            proj.dirty = true;
+            return;
+        }
         let mut best_l: Option<(usize, f32)> = None;
         for (i, l) in proj.labels.iter().enumerate() {
             let d = P::new(l.x, l.y).dist(w);
@@ -2288,6 +2343,16 @@ impl Schematic {
             ids.insert(id);
             Self::remove_components(proj, lib, &ids);
         }
+    }
+
+    fn finish_bus(&mut self, proj: &mut Project) {
+        if self.bus_draft.len() >= 2 {
+            let id = proj.alloc_id();
+            proj.buses.push(Bus { id, pts: std::mem::take(&mut self.bus_draft) });
+            proj.dirty = true;
+            self.hint = "Bus placed. Add net labels (A0, A1, ...) on the lines that join it.".into();
+        }
+        self.bus_draft.clear();
     }
 
     /// Flip the selected parts left to right on screen.
@@ -2434,17 +2499,49 @@ impl Schematic {
 
     // ------------------------------------------------------------ drawing
 
-    fn draw_sheet(&self, p: &egui::Painter, rect: Rect) {
-        let a = self.view.to_screen(P::new(0.0, 0.0));
-        let b = self.view.to_screen(P::new(SHEET_W, SHEET_H));
-        let r = Rect::from_two_pos(a, b);
-        if r.intersects(rect) {
-            p.rect_stroke(
-                r,
-                0.0,
-                Stroke::new(1.0, Color32::from_rgb(0x50, 0x54, 0x58)),
-                StrokeKind::Middle,
-            );
+    fn draw_sheet(&self, p: &egui::Painter, rect: Rect, sheets: usize) {
+        for i in 0..sheets {
+            let left = sheet_left(i);
+            let a = self.view.to_screen(P::new(left, 0.0));
+            let b = self.view.to_screen(P::new(left + SHEET_W, SHEET_H));
+            let r = Rect::from_two_pos(a, b);
+            if r.intersects(rect) {
+                let current = i == self.current_sheet;
+                p.rect_stroke(
+                    r,
+                    0.0,
+                    Stroke::new(if current { 1.4 } else { 1.0 }, if current { Color32::from_rgb(0x70, 0x78, 0x80) } else { Color32::from_rgb(0x50, 0x54, 0x58) }),
+                    StrokeKind::Middle,
+                );
+                if sheets > 1 {
+                    p.text(
+                        r.left_top() + Vec2::new(6.0, -4.0),
+                        egui::Align2::LEFT_BOTTOM,
+                        format!("Sheet {} of {}", i + 1, sheets),
+                        FontId::new(12.0, FontFamily::Proportional),
+                        Color32::from_rgb(0x90, 0x98, 0xA0),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Thick bus lines and the one being drawn.
+    fn draw_buses(&self, p: &egui::Painter, proj: &Project) {
+        let color = Color32::from_rgb(0x30, 0x80, 0xFF);
+        for b in &proj.buses {
+            let pts: Vec<Pos2> = b.pts.iter().map(|q| self.view.to_screen(*q)).collect();
+            if pts.len() >= 2 {
+                p.add(Shape::line(pts, Stroke::new(4.5, color)));
+            }
+        }
+        if !self.bus_draft.is_empty() {
+            let mut pts: Vec<Pos2> = self.bus_draft.iter().map(|q| self.view.to_screen(*q)).collect();
+            let last = *self.bus_draft.last().unwrap();
+            let corner = P::new(self.mouse.x, last.y);
+            pts.push(self.view.to_screen(corner));
+            pts.push(self.view.to_screen(self.mouse));
+            p.add(Shape::line(pts, Stroke::new(4.5, color.gamma_multiply(0.55))));
         }
     }
 
@@ -3193,6 +3290,18 @@ pub fn part_icon(ui: &mut egui::Ui, def: &crate::model::PartDef, lib: &Library) 
     response
 }
 
+/// The label to offer after placing `text`: a trailing number counts up, so
+/// A0 is followed by A1 and a run of bus labels needs no typing.
+fn increment_label(text: &str) -> Option<String> {
+    let digits = text.chars().rev().take_while(|c| c.is_ascii_digit()).count();
+    if digits == 0 || digits > 9 {
+        return None;
+    }
+    let (head, tail) = text.split_at(text.len() - digits);
+    let n: u64 = tail.parse().ok()?;
+    Some(format!("{head}{:0width$}", n + 1, width = if tail.starts_with('0') { digits } else { 0 }))
+}
+
 /// Parts, labels and wires copied with Ctrl+C or Ctrl+X.
 #[derive(Clone)]
 struct Clip {
@@ -3217,6 +3326,7 @@ pub fn cursor_for_mode(tool: Tool, drawing_wire: bool, over_pin: bool, over_part
         Tool::Part => C::Copy,
         Tool::Label | Tool::Text => C::Text,
         Tool::Probe => C::PointingHand,
+        Tool::Bus => C::Crosshair,
         Tool::Delete => C::NotAllowed,
     }
 }
@@ -4824,6 +4934,35 @@ mod tests {
         assert_eq!(nl.net_of(r_new, 1), nl.net_of(d_new, 0), "pasted resistor still feeds the pasted LED");
         assert_eq!(nl.net_of(r_old, 1), nl.net_of(d_old, 0));
         assert_ne!(nl.net_of(r_new, 1), nl.net_of(r_old, 1), "the copy does not short into the original");
+    }
+
+    #[test]
+    fn bus_labels_count_up() {
+        assert_eq!(increment_label("A0").as_deref(), Some("A1"));
+        assert_eq!(increment_label("D7").as_deref(), Some("D8"));
+        assert_eq!(increment_label("D09").as_deref(), Some("D10"));
+        assert_eq!(increment_label("ADDR[0]"), None);
+        assert_eq!(increment_label("CLK"), None);
+    }
+
+    #[test]
+    fn a_bus_is_stored_and_deleted_without_touching_nets() {
+        let lib = Library::builtin();
+        let mut proj = crate::examples::build("NAND gate truth table", &lib).unwrap();
+        let nets_before = proj.netlist(&lib).names.len();
+        let mut sch = Schematic::default();
+        sch.bus_draft = vec![P::new(100.0, 100.0), P::new(900.0, 100.0)];
+        sch.finish_bus(&mut proj);
+        assert_eq!(proj.buses.len(), 1);
+        assert_eq!(proj.netlist(&lib).names.len(), nets_before, "a bus line adds no nets by itself");
+        Schematic::delete_at(&mut proj, &lib, P::new(500.0, 105.0));
+        assert!(proj.buses.is_empty());
+    }
+
+    #[test]
+    fn sheets_sit_side_by_side() {
+        assert_eq!(sheet_left(0), 0.0);
+        assert_eq!(sheet_left(2), 2.0 * (SHEET_W + SHEET_GAP));
     }
 
     #[test]

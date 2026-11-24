@@ -1635,6 +1635,12 @@ pub fn rot_mirror(rot: i32) -> i32 {
 }
 
 #[derive(Clone, Debug)]
+pub struct Bus {
+    pub id: u64,
+    pub pts: Vec<P>,
+}
+
+#[derive(Clone, Debug)]
 pub struct Wire {
     pub id: u64,
     pub pts: Vec<P>,
@@ -1901,6 +1907,11 @@ pub struct Project {
     pub path: Option<PathBuf>,
     pub comps: Vec<Component>,
     pub wires: Vec<Wire>,
+    /// Thick bus lines. They carry no connectivity themselves; the net
+    /// labels on the lines that join them (A0, A1, ...) do.
+    pub buses: Vec<Bus>,
+    /// Number of sheet frames laid side by side on the canvas.
+    pub sheets: usize,
     pub labels: Vec<Label>,
     pub fps: Vec<Footprint>,
     pub tracks: Vec<Track>,
@@ -1921,6 +1932,8 @@ impl Project {
             path: None,
             comps: Vec::new(),
             wires: Vec::new(),
+            buses: Vec::new(),
+            sheets: 1,
             labels: Vec::new(),
             fps: Vec::new(),
             tracks: Vec::new(),

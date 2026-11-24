@@ -673,6 +673,23 @@ impl AppState {
             if ui.button("Design Explorer").clicked() {
                 self.set_tab(Tab::Explorer);
             }
+            ui.separator();
+            for i in 0..self.proj.sheets.max(1) {
+                if ui.button(format!("Go to sheet {}", i + 1)).clicked() {
+                    self.schematic.pending_sheet = Some(i);
+                    self.set_tab(Tab::Schematic);
+                }
+            }
+            if ui.button("Add sheet").clicked() && self.proj.sheets < 64 {
+                self.proj.sheets += 1;
+                self.proj.dirty = true;
+                self.schematic.pending_sheet = Some(self.proj.sheets - 1);
+                self.set_tab(Tab::Schematic);
+                self.status = format!(
+                    "Sheet {} added. Join nets between sheets with net labels of the same name.",
+                    self.proj.sheets
+                );
+            }
         });
         ui.menu_button("Tools", |ui| {
             if ui.button("Simulation").clicked() {
@@ -851,6 +868,7 @@ impl AppState {
                         (schematic::Tool::Label, toolicons::Icon::Label, "Net Label"),
                         (schematic::Tool::Text, toolicons::Icon::Text, "Text"),
                         (schematic::Tool::Probe, toolicons::Icon::Probe, "Voltage Probe"),
+                        (schematic::Tool::Bus, toolicons::Icon::Bus, "Bus"),
                         (schematic::Tool::Delete, toolicons::Icon::Delete, "Delete"),
                     ] {
                         if toolicons::mode_button(ui, &mut self.schematic.tool, tool, icon, tip)
@@ -1535,6 +1553,9 @@ impl eframe::App for AppState {
             });
 
         scope::show(&ctx, &mut self.scope, self.sim.as_ref());
+        if let Some(next) = self.schematic.next_label.take() {
+            self.label_text = next;
+        }
         self.schematic.erc_marks = self.dialogs.erc.iter().map(|i| (i.at, i.severity == erc::Severity::Error)).collect();
         if let Some(pid) = self.dialogs.pick_selected.take() {
             self.schematic.pending = Some(pid.clone());
@@ -1968,6 +1989,11 @@ fn main() {
                 Some("simulation") => app.tab = Tab::Simulation,
                 Some("home") => app.tab = Tab::Home,
                 _ => {}
+            }
+            if let Some(n) = args_for_ui.iter().position(|arg| arg == "--sheets").and_then(|i| args_for_ui.get(i + 1)).and_then(|n| n.parse::<usize>().ok()) {
+                app.proj.sheets = n.clamp(1, 8);
+                app.proj.buses.push(model::Bus { id: 9001, pts: vec![P::new(300.0, 300.0), P::new(1300.0, 300.0), P::new(1300.0, 700.0)] });
+                app.schematic.pending_sheet = Some(0);
             }
             if args_for_ui.iter().any(|arg| arg == "--autoroute") {
                 app.autoroute_pcb();

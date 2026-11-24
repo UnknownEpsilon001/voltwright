@@ -698,6 +698,9 @@ impl Dialogs {
                         "Middle wheel             - zoom around the cursor",
                         "Middle click + move      - track pan, click to drop",
                         "Shift + drag             - zoom into a box",
+                        "M                        - mirror the selection (or the part being placed)",
+                        "Ctrl+C / Ctrl+X / Ctrl+V - copy, cut and paste parts, wires and labels",
+                        "Arrow keys               - nudge the selection by one grid step",
                     ] {
                         ui.label(format!("   {t}"));
                     }

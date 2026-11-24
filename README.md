@@ -35,6 +35,11 @@ It is early work. Expect rough edges and file-format changes.
   SR latch, D flip-flop divider, clickable logic inputs), plus a smoothing rectifier, inverting amplifier, series RLC
   resonance and common-emitter amplifier. AND, OR, XOR, NAND, NOR, XNOR, NOT and buffer gates are simulated
   as 5 V logic.
+- Schematic editing: mirror (M), rotate, copy/cut/paste with wires kept,
+  arrow-key nudge, a thick bus tool, net labels that count up (A0, A1, ...),
+  several sheets side by side (View > Add sheet; nets join across sheets by
+  label name), automatic annotation (Tools > Annotate), and an electrical
+  rules check (Tools > Electrical Rules Check) that marks problems on the sheet.
 - PCB autorouter (Tools > Autoroute PCB, or the Autoroute button on the PCB tab): a two-layer maze router with vias that keeps clearances to pads, tracks and the board edge, leaves already-connected nets alone, and reports any net it could not finish. It is one undo step; "Rip up" removes all tracks. The ratsnest now shows only the connections still open.
 - CNC export (File > Export): G-code for GRBL-style routers in millimetres -
   isolation routing around top copper, drilling with tool-change pauses, and a

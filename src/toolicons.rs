@@ -11,6 +11,7 @@ pub enum Icon {
     Label,
     Text,
     Probe,
+    Bus,
     Delete,
     Track,
     Via,
@@ -73,6 +74,12 @@ fn draw(p: &egui::Painter, r: Rect, icon: Icon, ink: Color32) {
                 outline.iter().map(|&(x, y)| q(x, y)).collect(),
                 Stroke::new(1.0, Color32::from_rgb(0x10, 0x14, 0x18)),
             ));
+        }
+        Icon::Bus => {
+            // A thick line with two short branches.
+            p.add(Shape::line(vec![at(0.0, 0.5), at(1.0, 0.5)], Stroke::new(4.0, ink)));
+            line(&[(0.3, 0.5), (0.3, 0.05)]);
+            line(&[(0.7, 0.5), (0.7, 0.95)]);
         }
         Icon::Wire => {
             line(&[(0.0, 0.85), (0.4, 0.85), (0.4, 0.15), (1.0, 0.15)]);
