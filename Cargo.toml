@@ -6,7 +6,7 @@ description = "Open-source schematic capture, circuit simulation and PCB layout"
 license = "MIT"
 
 [dependencies]
-eframe = "0.37"
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "clipboard"] }
 egui = "0.37"
 image = "0.25"
 miniz_oxide = "0.8"
@@ -14,5 +14,22 @@ miniz_oxide = "0.8"
 [profile.dev]
 opt-level = 1
 
+# Day-to-day builds: quick to compile, still fast to run.
 [profile.release]
-opt-level = 2
+opt-level = 3
+incremental = true
+codegen-units = 16
+
+# Final distributable build: slow to compile, smallest and fastest binary.
+#   cargo build --profile dist
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+incremental = false
+strip = true
+
+# Dependencies (egui and friends) are compiled once with full optimisation so
+# even debug builds of the app stay responsive.
+[profile.dev.package."*"]
+opt-level = 3

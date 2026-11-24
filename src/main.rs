@@ -727,7 +727,7 @@ impl AppState {
                 self.start_simulation();
             }
             if ui
-                .add_enabled(running, egui::Button::new("■  Stop"))
+                .add_enabled(running, egui::Button::new("Stop"))
                 .on_hover_text("Stop the running simulation")
                 .clicked()
             {
@@ -1173,10 +1173,9 @@ impl eframe::App for AppState {
 
         let frame_dt = ui.input(|i| i.unstable_dt as f64);
         if self.pump_simulation(frame_dt) {
-            // Current arrows only need about 30 frames a second. An unbounded
-            // repaint request made egui redraw every grid dot and wire on every
-            // vsync while the solver ran, which starved input on slower PCs.
-            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+            // Nothing animates between solver ticks (arrows and LED glow are
+            // static), so redraw at the 20 Hz solve rate.
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
 
         let typing = ctx.memory(|m| m.focused().is_some());

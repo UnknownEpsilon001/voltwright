@@ -733,7 +733,8 @@ impl Simulator {
             })
             .fold(0.0f64, f64::max);
         if fmax > 0.0 {
-            n = n.max((dt * 40.0 * fmax).ceil() as usize);
+            let per_cycle = if self.traces.is_empty() && !self.taps.iter().any(|t| t.counter) { 20.0 } else { 40.0 };
+            n = n.max((dt * per_cycle * fmax).ceil() as usize);
         }
         let n = n.clamp(1, 2000);
         for _ in 0..n {
@@ -1046,6 +1047,7 @@ fn solve(sim: &mut Simulator, dt: Option<f64>, t: f64) -> Result<(Vec<f64>, Vec<
         return Ok((vec![0.0; sim.nodes], Vec::new()));
     }
 
+    let nonlinear = sim.els.iter().any(|e| matches!(e.kind, Kind::D | Kind::Npn | Kind::Pnp));
     let mut lin = sim.lin.clone();
     let mut out_v = sim.v.clone();
     let mut out_b = vec![0.0; nbranch];
@@ -1135,21 +1137,27 @@ fn solve(sim: &mut Simulator, dt: Option<f64>, t: f64) -> Result<(Vec<f64>, Vec<
                     let b_pin = e.pins.first().copied().unwrap_or(0);
                     let c_pin = e.pins.get(1).copied().unwrap_or(0);
                     let e_pin = e.pins.get(2).copied().unwrap_or(0);
-                    let (g, _) = diode_params(lin[ei]);
+                    // Base-emitter diode with its Newton companion current;
+                    // the collector carries gain times the base current.
+                    let (g, ieq) = diode_params(lin[ei]);
                     stamp_g(&mut m, unknown(b_pin), unknown(e_pin), g);
-                    let gm = e.gain.max(1.0) * g;
-                    stamp_vccs(&mut m, c_pin, e_pin, b_pin, e_pin, gm);
+                    stamp_i(&mut m, unknown(b_pin), unknown(e_pin), ieq);
+                    let gain = e.gain.max(1.0);
+                    stamp_vccs(&mut m, c_pin, e_pin, b_pin, e_pin, gain * g);
+                    stamp_i(&mut m, unknown(c_pin), unknown(e_pin), gain * ieq);
                 }
                 Kind::Pnp => {
                     // pins: 0 = B, 1 = C, 2 = E
                     let b_pin = e.pins.first().copied().unwrap_or(0);
                     let c_pin = e.pins.get(1).copied().unwrap_or(0);
                     let e_pin = e.pins.get(2).copied().unwrap_or(0);
-                    let (g, _) = diode_params(lin[ei]);
+                    let (g, ieq) = diode_params(lin[ei]);
                     stamp_g(&mut m, unknown(e_pin), unknown(b_pin), g);
-                    let gm = e.gain.max(1.0) * g;
-                    // current gm*(vE - vB) flowing E -> C
-                    stamp_vccs(&mut m, e_pin, c_pin, e_pin, b_pin, gm);
+                    stamp_i(&mut m, unknown(e_pin), unknown(b_pin), ieq);
+                    let gain = e.gain.max(1.0);
+                    // current gain * (g*(vE - vB) + ieq) flowing E -> C
+                    stamp_vccs(&mut m, e_pin, c_pin, e_pin, b_pin, gain * g);
+                    stamp_i(&mut m, unknown(e_pin), unknown(c_pin), gain * ieq);
                 }
                 Kind::Timer => {
                     if e.pins.len() >= 8 {
@@ -1250,7 +1258,10 @@ fn solve(sim: &mut Simulator, dt: Option<f64>, t: f64) -> Result<(Vec<f64>, Vec<
                 _ => continue,
             };
             let nv = nv.clamp(-5.0, if e.is_led { 5.0 } else { 1.5 });
-            let blended = lin[ei] * 0.5 + nv * 0.5;
+            // Take a full Newton step near the solution, where it converges
+            // quickly, and half steps while far away, where it could overshoot.
+            let delta = nv - lin[ei];
+            let blended = if delta.abs() < 0.15 { nv } else { lin[ei] + delta * 0.5 };
             d_lin = d_lin.max((blended - lin[ei]).abs());
             next_lin[ei] = blended;
         }
@@ -1267,7 +1278,11 @@ fn solve(sim: &mut Simulator, dt: Option<f64>, t: f64) -> Result<(Vec<f64>, Vec<
         lin = next_lin;
         fresh = false;
 
-        if d_lin < 1e-7 && d_v < 1e-9 {
+        if d_lin < 1e-6 && d_v < 1e-6 {
+            break;
+        }
+        // A circuit with no diodes or transistors is linear: one solve is exact.
+        if !nonlinear {
             break;
         }
     }

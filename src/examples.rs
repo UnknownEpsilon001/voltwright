@@ -824,3 +824,25 @@ mod tests {
         assert!((v - 3.0).abs() < 0.2, "output {v} V, expected 3 V");
     }
 }
+#[cfg(test)]
+mod bench {
+    use super::*;
+    use crate::sim::Simulator;
+    #[test]
+    #[ignore]
+    fn step_times() {
+        let lib = Library::builtin();
+        for name in names() {
+            let proj = build(name, &lib).unwrap();
+            let mut sim = Simulator::from_project(&proj, &lib).unwrap();
+            sim.solve_dc().unwrap();
+            let t = std::time::Instant::now();
+            for _ in 0..20 { sim.step(0.05).unwrap(); }
+            let step = t.elapsed().as_secs_f64() / 20.0 * 1000.0;
+            let t = std::time::Instant::now();
+            for _ in 0..20 { let _c = sim.clone(); }
+            let clone = t.elapsed().as_secs_f64() / 20.0 * 1000.0;
+            eprintln!("BENCH {name:45} step {step:7.2} ms  clone {clone:6.3} ms");
+        }
+    }
+}

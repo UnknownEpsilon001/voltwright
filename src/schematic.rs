@@ -3624,7 +3624,7 @@ fn draw_component(
                     p.text(
                         circ.center(),
                         egui::Align2::CENTER_CENTER,
-                        "\u{266A}",
+                        "SP",
                         FontId::new(22.0, FontFamily::Proportional),
                         ink,
                     );
