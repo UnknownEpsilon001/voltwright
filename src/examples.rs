@@ -144,6 +144,80 @@ const EXAMPLES: &[Example] = &[
             &[("V1", 1), ("GND1", 0)],
         ],
     },
+    Example {
+        name: "555 timer LED blinker",
+        notes: "A 555 in astable mode: C1 charges through R1 and R2 and \
+                discharges through R2, so the output flips about 1.5 times a \
+                second and D1 blinks. f = 1.44 / ((R1 + 2 x R2) x C1). Press \
+                Run Simulation and watch the LED.",
+        parts: &[
+            part("555", "U1", "NE555", 0.0, 0.0, 0),
+            part("VCC", "VCC1", "5V", 200.0, -75.0, 0),
+            part("VCC", "VCC2", "5V", -200.0, 110.0, 0),
+            part("VCC", "VCC3", "5V", 400.0, -205.0, 0),
+            part("GND", "GND1", "0V", -200.0, -75.0, 0),
+            part("RESISTOR", "R1", "1k", 400.0, -85.0, 90),
+            part("RESISTOR", "R2", "47k", 400.0, 35.0, 90),
+            part("CAP", "C1", "10u", 400.0, 230.0, 90),
+            part("GND", "GND2", "0V", 400.0, 350.0, 0),
+            part("RESISTOR", "R3", "220R", -400.0, 25.0, 0),
+            part("LED-RED", "D1", "LED-RED", -460.0, 85.0, 90),
+            part("GND", "GND3", "0V", -460.0, 205.0, 0),
+        ],
+        nets: &[
+            &[("U1", 7), ("VCC1", 0)],
+            &[("U1", 3), ("VCC2", 0)],
+            &[("U1", 0), ("GND1", 0)],
+            &[("VCC3", 0), ("R1", 0)],
+            &[("R1", 1), ("U1", 6)],
+            &[("R2", 0), ("U1", 6)],
+            &[("R2", 1), ("U1", 5)],
+            &[("R2", 1), ("C1", 0)],
+            &[("C1", 0), ("U1", 1)],
+            &[("C1", 1), ("GND2", 0)],
+            &[("U1", 2), ("R3", 1)],
+            &[("R3", 0), ("D1", 0)],
+            &[("D1", 1), ("GND3", 0)],
+        ],
+    },
+    Example {
+        name: "Op-amp voltage follower",
+        notes: "The output is wired straight back to the inverting input, so \
+                U1 copies the 2 V input with unity gain and can drive the \
+                load. This is an ideal op-amp; its supply pins are not used by \
+                the simulation.",
+        parts: &[
+            part("DCSRC", "V1", "2V", -250.0, 20.0, 90),
+            part("OPAMP", "U1", "OPAMP", 0.0, 0.0, 0),
+            part("RESISTOR", "RL", "1k", 300.0, 60.0, 90),
+            part("GND", "GND1", "0V", -250.0, 200.0, 0),
+        ],
+        nets: &[
+            &[("V1", 0), ("U1", 0)],
+            &[("U1", 2), ("RL", 0)],
+            &[("U1", 2), ("U1", 1)],
+            &[("V1", 1), ("GND1", 0)],
+            &[("RL", 1), ("GND1", 0)],
+        ],
+    },
+    Example {
+        name: "RC low-pass filter",
+        notes: "A 1 kHz sine passes through R1 and C1. The corner frequency is \
+                1 / (2 x pi x R x C), about 1.6 kHz. Run an AC sweep on the \
+                Simulation tab to see the output fall away above it.",
+        parts: &[
+            part("SINE", "V1", "SINE(0 1 1k)", -250.0, 60.0, 90),
+            part("RESISTOR", "R1", "1k", -50.0, 0.0, 0),
+            part("CAP", "C1", "100n", 150.0, 60.0, 90),
+            part("GND", "GND1", "0V", -250.0, 260.0, 0),
+        ],
+        nets: &[
+            &[("V1", 0), ("R1", 0)],
+            &[("R1", 1), ("C1", 0)],
+            &[("C1", 1), ("V1", 1)],
+            &[("V1", 1), ("GND1", 0)],
+        ],
+    },
 ];
 
 /// Names of the built-in examples, in menu order.
@@ -232,6 +306,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_555_blinker_blinks() {
+        let lib = Library::builtin();
+        let proj = build("555 timer LED blinker", &lib).unwrap();
+        let mut sim = Simulator::from_project(&proj, &lib).unwrap();
+        sim.solve_dc().unwrap();
+        let (mut on, mut off, mut flips) = (0, 0, 0);
+        let mut last = false;
+        // Eight seconds in 50 ms steps, like the live simulation.
+        for i in 0..160 {
+            sim.step(0.05).unwrap();
+            let lit = sim.led_level("D1") > 0.05;
+            if lit { on += 1 } else { off += 1 }
+            if i > 0 && lit != last {
+                flips += 1;
+            }
+            last = lit;
+        }
+        assert!(on > 20 && off > 20, "LED was on {on} and off {off} steps");
+        assert!(flips >= 6, "expected several blinks in 8 s, got {flips} changes");
+    }
+
+    #[test]
+    fn follower_output_equals_input() {
+        let lib = Library::builtin();
+        let proj = build("Op-amp voltage follower", &lib).unwrap();
+        let mut sim = Simulator::from_project(&proj, &lib).unwrap();
+        sim.solve_dc().unwrap();
+        let rl = sim.element("RL").unwrap();
+        let v = sim.element_voltage(rl).abs();
+        assert!((v - 2.0).abs() < 0.05, "output {v} V, expected 2 V");
     }
 
     #[test]

@@ -12,7 +12,7 @@ It is early work. Expect rough edges and file-format changes.
   them, and junction dots appear where three or more wire ends meet.
 - Live simulation: press Run and watch current arrows move along the wires.
   The solver handles resistors, capacitors, inductors, sources, diodes, LEDs,
-  NPN/PNP transistors, op-amps, switches and lamps. Overloaded LEDs and
+  NPN/PNP transistors, op-amps, a 555 timer, switches and lamps. Overloaded LEDs and
   resistors burn out.
 - Analyses: transient and AC sweep.
 - PCB layout with design-rule checks.
@@ -28,8 +28,10 @@ It is early work. Expect rough edges and file-format changes.
   `.bin` or Intel HEX file to check its checksums and browse its bytes.
   Voltwright has no compiler or CPU emulator yet, so firmware is not run in
   the simulation.
-- Built-in example circuits (Examples menu): LED, voltage divider,
-  transistor switch, RC charging, op-amp amplifier and diode rectifier.
+- Built-in example circuits (Examples menu or the Home page): LED, voltage
+  divider, transistor switch, RC charging, op-amp amplifier, diode
+  rectifier, 555 timer LED blinker, op-amp voltage follower and RC low-pass
+  filter.
 - Import of `.pdsprj` projects. Voltwright brings across the parts it has
   models for, rebuilds the nets and reroutes the wires; it lists anything it
   had to skip.

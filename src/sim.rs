@@ -155,6 +155,8 @@ pub enum Kind {
     Pnp,
     OpAmp,
     Lamp,
+    /// 555 timer: pins GND, TRIG, OUT, RESET, CTRL, THRESH, DISCH, VCC.
+    Timer,
 }
 
 #[derive(Clone, Debug)]
@@ -172,6 +174,8 @@ pub struct El {
     pub damage: f64,
     pub temperature_c: f64,
     pub fault: Option<String>,
+    /// Output latch of a timer; unused by other elements.
+    pub latched: bool,
 }
 
 impl El {
@@ -232,6 +236,7 @@ impl Simulator {
                 SimKind::Pnp => Kind::Pnp,
                 SimKind::OpAmp => Kind::OpAmp,
                 SimKind::Lamp => Kind::Lamp,
+                SimKind::Timer => Kind::Timer,
                 SimKind::None => continue,
             };
             let value = match &kind {
@@ -276,6 +281,7 @@ impl Simulator {
                 damage: 0.0,
                 temperature_c: AMBIENT_TEMPERATURE_C,
                 fault: None,
+                latched: true,
             });
         }
 
@@ -305,6 +311,7 @@ impl Simulator {
                         damage: 0.0,
                         temperature_c: AMBIENT_TEMPERATURE_C,
                         fault: None,
+                        latched: true,
                     });
                 }
             }
@@ -388,7 +395,7 @@ impl Simulator {
         let vb = self.v.get(el.b()).copied().unwrap_or(0.0);
         match &el.kind {
             Kind::R | Kind::Lamp => (va - vb) / el.value.max(1e-9),
-            Kind::C => 0.0,
+            Kind::C | Kind::Timer => 0.0,
             Kind::L | Kind::V { .. } | Kind::OpAmp => el
                 .branch
                 .and_then(|b| self.branch.get(b).copied())
@@ -568,6 +575,42 @@ impl Simulator {
     }
 
     pub fn step(&mut self, dt: f64) -> Result<(), String> {
+        // A timer switches on voltage thresholds, so advance in small sub-steps
+        // to keep the blink period close to the real one.
+        if self.els.iter().any(|e| matches!(e.kind, Kind::Timer)) {
+            let n = ((dt / 0.002).ceil() as usize).clamp(1, 60);
+            for _ in 0..n {
+                self.step_once(dt / n as f64)?;
+                self.update_timers();
+            }
+            return Ok(());
+        }
+        self.step_once(dt)
+    }
+
+    /// Move each 555's output latch according to its comparators: a trigger
+    /// below 1/3 of the supply sets it, a threshold above 2/3 resets it, and
+    /// a low reset pin or a dead supply forces it low.
+    fn update_timers(&mut self) {
+        let v = self.v.clone();
+        for e in &mut self.els {
+            if !matches!(e.kind, Kind::Timer) || e.pins.len() < 8 {
+                continue;
+            }
+            let at = |i: usize| v.get(e.pins[i]).copied().unwrap_or(0.0);
+            let gnd = at(0);
+            let supply = at(7) - gnd;
+            if supply < 2.0 || at(3) - gnd < 0.4 {
+                e.latched = false;
+            } else if at(1) - gnd < supply / 3.0 {
+                e.latched = true;
+            } else if at(5) - gnd > supply * 2.0 / 3.0 {
+                e.latched = false;
+            }
+        }
+    }
+
+    fn step_once(&mut self, dt: f64) -> Result<(), String> {
         let (v, b) = solve(self, Some(dt), self.t)?;
         self.v = v;
         self.branch = b;
@@ -583,6 +626,7 @@ impl Simulator {
 
 fn default_for(k: SimKind) -> f64 {
     match k {
+        SimKind::Timer => 0.0,
         SimKind::R => 10_000.0,
         SimKind::C => 1e-7,
         SimKind::L => 1e-2,
@@ -893,6 +937,27 @@ fn solve(sim: &mut Simulator, dt: Option<f64>, t: f64) -> Result<(Vec<f64>, Vec<
                     // current gm*(vE - vB) flowing E -> C
                     stamp_vccs(&mut m, e_pin, c_pin, e_pin, b_pin, gm);
                 }
+                Kind::Timer => {
+                    if e.pins.len() >= 8 {
+                        let (gnd, out, dis) = (unknown(e.pins[0]), unknown(e.pins[2]), unknown(e.pins[6]));
+                        let supply = sim.v.get(e.pins[7]).copied().unwrap_or(0.0)
+                            - sim.v.get(e.pins[0]).copied().unwrap_or(0.0);
+                        // Output stage: about 10 ohms to the high level (one
+                        // diode drop and a bit below the supply) or to near 0 V.
+                        let target = if supply < 2.0 {
+                            0.0
+                        } else if e.latched {
+                            (supply - 1.7).max(0.0)
+                        } else {
+                            0.1
+                        };
+                        stamp_g(&mut m, out, gnd, 0.1);
+                        stamp_i(&mut m, gnd, out, 0.1 * target);
+                        // Discharge transistor: on while the output is low.
+                        let g = if e.latched && supply >= 2.0 { 1e-9 } else { 0.1 };
+                        stamp_g(&mut m, dis, gnd, g);
+                    }
+                }
                 Kind::OpAmp => {
                     let b = br.unwrap();
                     let out = e.pins.get(2).copied().unwrap_or(0);
@@ -1184,6 +1249,7 @@ pub fn ac_sweep(sim: &mut Simulator, f1: f64, f2: f64, decades: usize) -> Result
             let ub = unknown(e.b());
             let br = slots[ei];
             match &e.kind {
+                Kind::Timer => {}
                 Kind::R | Kind::Lamp => {
                     ccg(&mut m, ua, ub, C64::of(1.0 / e.value.max(1e-9)));
                 }

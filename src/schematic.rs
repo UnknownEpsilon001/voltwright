@@ -441,6 +441,29 @@ impl Schematic {
         out
     }
 
+    /// Small squares on every pin that is not an end of the route being drawn.
+    /// A wire running over an unrelated pin looks connected to it, so the
+    /// router goes around. Only pins near the route's bounding box matter.
+    fn foreign_pin_squares(proj: &Project, lib: &Library, start: P, end: P) -> Vec<Rect> {
+        let (lo_x, hi_x) = (start.x.min(end.x) - 250.0, start.x.max(end.x) + 250.0);
+        let (lo_y, hi_y) = (start.y.min(end.y) - 250.0, start.y.max(end.y) + 250.0);
+        let mut out = Vec::new();
+        for c in &proj.comps {
+            let Some(def) = lib.get(&c.part) else { continue };
+            for pd in &def.pins {
+                let at = c.pos().add(pd.pos.rot(c.rot));
+                if at.x < lo_x || at.x > hi_x || at.y < lo_y || at.y > hi_y {
+                    continue;
+                }
+                if at.dist(start) < 1.0 || at.dist(end) < 1.0 {
+                    continue;
+                }
+                out.push(Rect::from_center_size(Pos2::new(at.x, at.y), Vec2::splat(8.0)));
+            }
+        }
+        out
+    }
+
     fn segment_crosses_rect(a: P, b: P, r: Rect) -> bool {
         const EPS: f32 = 0.5;
         if (a.y - b.y).abs() < EPS {
@@ -645,7 +668,8 @@ impl Schematic {
         if start.dist(end) < 0.5 {
             return vec![start];
         }
-        let obstacles = Self::component_obstacles(proj, lib);
+        let mut obstacles = Self::component_obstacles(proj, lib);
+        obstacles.extend(Self::foreign_pin_squares(proj, lib, start, end));
         let wires = Self::wire_segments_foreign(proj, skip_wire, start, end);
         let simple = Self::simplify_route(vec![
             start,
@@ -718,7 +742,8 @@ impl Schematic {
         if start.dist(end) < 0.5 {
             return vec![start];
         }
-        let obstacles = Self::component_obstacles(proj, lib);
+        let mut obstacles = Self::component_obstacles(proj, lib);
+        obstacles.extend(Self::foreign_pin_squares(proj, lib, start, end));
         let wires = Self::wire_segments_foreign(proj, skip_wire, start, end);
         let mid = if horizontal_first {
             P::new(end.x, start.y)
@@ -1091,7 +1116,14 @@ impl Schematic {
                 }
                 // Keep the wire's shape when it can simply stretch.
                 if let Some(route) = Self::stretch_wire(proj, lib, w) {
-                    if route.windows(2).all(|s| Self::segments_clear(s[0], s[1], &obstacles)) {
+                    let mut blockers = obstacles.clone();
+                    blockers.extend(Self::foreign_pin_squares(
+                        proj,
+                        lib,
+                        route[0],
+                        *route.last().unwrap(),
+                    ));
+                    if route.windows(2).all(|s| Self::segments_clear(s[0], s[1], &blockers)) {
                         return Some((w.id, route));
                     }
                 }
@@ -4111,8 +4143,19 @@ mod tests {
             && b0.y.min(b1.y) <= a0.y.max(a1.y) + 0.5
     }
 
+    fn all_pins(proj: &Project, lib: &Library) -> Vec<P> {
+        proj.comps
+            .iter()
+            .flat_map(|c| {
+                lib.get(&c.part)
+                    .map(|d| d.pins.iter().map(|pd| c.pos().add(pd.pos.rot(c.rot))).collect::<Vec<_>>())
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
     /// Everything wrong with one routed wire, as short labels.
-    fn route_defects(route: &[P], start: P, end: P, obstacles: &[Rect]) -> Vec<&'static str> {
+    fn route_defects(route: &[P], start: P, end: P, obstacles: &[Rect], pins: &[P]) -> Vec<&'static str> {
         let mut bad = Vec::new();
         if route.len() < 2 || !near(route[0], start) || !near(*route.last().unwrap(), end) {
             bad.push("endpoints");
@@ -4148,6 +4191,9 @@ mod tests {
         }
         if segs.iter().any(|(a, b)| !Schematic::segments_clear(*a, *b, obstacles)) {
             bad.push("through-part");
+        }
+        if segs.iter().any(|(a, b)| pins.iter().any(|q| q.dist(start) > 1.0 && q.dist(end) > 1.0 && Schematic::point_on_segment(*q, *a, *b))) {
+            bad.push("over-pin");
         }
         bad.sort();
         bad.dedup();
@@ -4256,7 +4302,7 @@ mod tests {
                 let (Some(a), Some(b)) = (w.start_pin, w.end_pin) else { continue };
                 let (Some(sp), Some(ep)) = (proj.pin_pos(&lib, a.0, a.1), proj.pin_pos(&lib, b.0, b.1)) else { continue };
                 wires += 1;
-                let bad = route_defects(&w.pts, sp, ep, &obstacles);
+                let bad = route_defects(&w.pts, sp, ep, &obstacles, &all_pins(&proj, &lib));
                 if !bad.is_empty() {
                     defective += 1;
                     for b in &bad {
@@ -4281,7 +4327,9 @@ mod tests {
                 let (Some(a), Some(b)) = (w.start_pin, w.end_pin) else { continue };
                 let sp = proj.pin_pos(&lib, a.0, a.1).unwrap();
                 let ep = proj.pin_pos(&lib, b.0, b.1).unwrap();
-                let bad = route_defects(&w.pts, sp, ep, &obstacles);
+                let mut bad = route_defects(&w.pts, sp, ep, &obstacles, &all_pins(&proj, &lib));
+                // A feedback wire that must wrap round a part is long on purpose.
+                bad.retain(|b| *b != "detour");
                 assert!(bad.is_empty(), "{name}: {bad:?} {:?}", w.pts.iter().map(|p| (p.x, p.y)).collect::<Vec<_>>());
             }
         }
@@ -4296,7 +4344,7 @@ mod tests {
         }
         // A long way round is sometimes forced (two pins facing the same
         // way), so detours are only reported. Everything else is a bug.
-        for kind in ["endpoints", "diagonal", "zero-length", "reversal", "self-crossing", "through-part"] {
+        for kind in ["endpoints", "diagonal", "zero-length", "reversal", "self-crossing", "through-part", "over-pin"] {
             assert_eq!(counts.get(kind).copied().unwrap_or(0), 0, "{kind}: {examples:?}");
         }
     }
@@ -4353,7 +4401,7 @@ mod tests {
                     continue;
                 }
                 moved_wires += 1;
-                let mut bad = route_defects(&w.pts, sp, ep, &obstacles);
+                let mut bad = route_defects(&w.pts, sp, ep, &obstacles, &all_pins(&proj, &lib));
                 bad.retain(|b| *b != "detour");
                 // Tiny jogs between two bends look like a glitch.
                 if w.pts.windows(2).enumerate().any(|(i, s)| i > 0 && i + 2 < w.pts.len() && s[0].dist(s[1]) < 30.0) {
@@ -4386,7 +4434,7 @@ mod tests {
             println!("MOVE e.g. {e}");
         }
         // Moving a part must stretch its wires, not scramble them.
-        for kind in ["endpoints", "diagonal", "zero-length", "reversal", "self-crossing", "through-part"] {
+        for kind in ["endpoints", "diagonal", "zero-length", "reversal", "self-crossing", "through-part", "over-pin"] {
             assert_eq!(counts.get(kind).copied().unwrap_or(0), 0, "{kind}: {examples:?}");
         }
         assert!(grew * 25 < wires, "{grew} of {wires} wires gained extra bends");

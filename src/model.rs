@@ -125,6 +125,7 @@ pub enum SimKind {
     Pnp,
     OpAmp,
     Lamp,
+    Timer,
 }
 
 #[derive(Clone, Debug)]
@@ -714,7 +715,7 @@ impl Library {
                 "TTL",
                 "DIL-8",
                 Symbol::Ic,
-                SimKind::None,
+                SimKind::Timer,
                 "NE555",
                 "U",
             );
