@@ -1961,6 +1961,78 @@ impl Project {
         format!("{}{}", prefix, max + 1)
     }
 
+    /// Give every part a unique reference designator. With `all` false only
+    /// the second and later users of a duplicated reference are renumbered;
+    /// with `all` true every part is renumbered in reading order (top to
+    /// bottom in rows, left to right within a row). Letters are kept.
+    /// Returns how many parts changed.
+    pub fn annotate(&mut self, lib: &Library, all: bool) -> usize {
+        let letters = |c: &Component, lib: &Library| -> String {
+            let l = c.refdes.trim_end_matches(|ch: char| ch.is_ascii_digit());
+            if l.is_empty() {
+                lib.get(&c.part).map(|d| d.prefix.clone()).unwrap_or_default()
+            } else {
+                l.to_string()
+            }
+        };
+        let mut order: Vec<usize> = (0..self.comps.len()).collect();
+        order.sort_by(|&a, &b| {
+            let (ca, cb) = (&self.comps[a], &self.comps[b]);
+            let (ra, rb) = ((ca.y / 200.0).floor() as i64, (cb.y / 200.0).floor() as i64);
+            ra.cmp(&rb).then(ca.x.total_cmp(&cb.x)).then(ca.y.total_cmp(&cb.y))
+        });
+        let mut changed = 0;
+        let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut next: HashMap<String, u32> = HashMap::new();
+        let mut fresh = |prefix: &str, used: &mut std::collections::HashSet<String>| -> String {
+            let n = next.entry(prefix.to_string()).or_insert(0);
+            loop {
+                *n += 1;
+                let name = format!("{prefix}{n}");
+                if !used.contains(&name) {
+                    return name;
+                }
+            }
+        };
+        if !all {
+            // Keep each first occurrence; remember the names in use.
+            for &i in &order {
+                let name = self.comps[i].refdes.clone();
+                if !name.is_empty() {
+                    used.insert(name);
+                }
+            }
+        }
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for &i in &order {
+            let prefix = letters(&self.comps[i], lib);
+            if prefix.is_empty() {
+                continue;
+            }
+            let current = self.comps[i].refdes.clone();
+            let keep = !all && !current.is_empty() && seen.insert(current.clone());
+            if keep {
+                continue;
+            }
+            let name = fresh(&prefix, &mut used);
+            used.insert(name.clone());
+            if name != current {
+                self.comps[i].refdes = name;
+                changed += 1;
+            }
+        }
+        let names: HashMap<u64, String> = self.comps.iter().map(|c| (c.id, c.refdes.clone())).collect();
+        for f in &mut self.fps {
+            if let Some(n) = names.get(&f.comp) {
+                f.refdes = n.clone();
+            }
+        }
+        if changed > 0 {
+            self.dirty = true;
+        }
+        changed
+    }
+
     pub fn add_component(&mut self, lib: &Library, part_id: &str, at: P) -> Option<u64> {
         let def = lib.get(part_id)?;
         let id = self.alloc_id();

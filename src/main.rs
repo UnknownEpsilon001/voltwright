@@ -346,6 +346,17 @@ impl AppState {
         };
     }
 
+    fn after_annotate(&mut self, changed: usize) {
+        self.status = if changed == 0 {
+            "Annotate: every reference is already in order.".into()
+        } else {
+            format!("Annotate: renumbered {changed} part(s).")
+        };
+        if changed > 0 {
+            self.rebuild_sim();
+        }
+    }
+
     fn rip_up_pcb(&mut self) {
         if self.proj.tracks.is_empty() && self.proj.vias.is_empty() {
             self.status = "Rip up: there are no tracks.".into();
@@ -681,6 +692,22 @@ impl AppState {
             if ui.button("Autoroute PCB").clicked() {
                 self.autoroute_pcb();
                 self.set_tab(Tab::Pcb);
+            }
+            if ui.button("Annotate: fix duplicate references").clicked() {
+                let before = self.proj.clone();
+                let n = self.proj.annotate(&self.lib, false);
+                if n > 0 {
+                    self.push_undo(before);
+                }
+                self.after_annotate(n);
+            }
+            if ui.button("Annotate: renumber all parts").clicked() {
+                let before = self.proj.clone();
+                let n = self.proj.annotate(&self.lib, true);
+                if n > 0 {
+                    self.push_undo(before);
+                }
+                self.after_annotate(n);
             }
             if ui.button("Electrical Rules Check").clicked() {
                 self.dialogs.erc = erc::check(&self.proj, &self.lib);

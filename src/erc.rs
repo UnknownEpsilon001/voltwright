@@ -213,4 +213,26 @@ mod tests {
         let issues = check(&proj, &lib);
         assert!(issues.iter().any(|i| i.severity == Severity::Error && i.message.contains("drive the same net")), "{issues:?}");
     }
+
+    #[test]
+    fn annotate_fixes_duplicates_and_renumbers_in_reading_order() {
+        let lib = Library::builtin();
+        let mut proj = Project::new("t");
+        let a = proj.add_component(&lib, "RESISTOR", P::new(900.0, 300.0)).unwrap();
+        let b = proj.add_component(&lib, "RESISTOR", P::new(300.0, 300.0)).unwrap();
+        let c = proj.add_component(&lib, "RESISTOR", P::new(600.0, 900.0)).unwrap();
+        for id in [a, b, c] {
+            proj.comp_mut(id).unwrap().refdes = "R1".into();
+        }
+        // Fixing duplicates keeps one R1 and gives the others new numbers.
+        assert_eq!(proj.annotate(&lib, false), 2);
+        let mut names: Vec<String> = proj.comps.iter().map(|c| c.refdes.clone()).collect();
+        names.sort();
+        assert_eq!(names, ["R1", "R2", "R3"]);
+        // Renumbering everything follows the reading order: row one left to right, then row two.
+        proj.annotate(&lib, true);
+        let r = |id: u64| proj.comp(id).unwrap().refdes.clone();
+        assert_eq!((r(b), r(a), r(c)), ("R1".into(), "R2".into(), "R3".into()));
+        assert_eq!(proj.annotate(&lib, false), 0, "already unique");
+    }
 }
