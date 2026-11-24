@@ -2436,42 +2436,30 @@ impl Schematic {
                 ),
             ));
             if flowing {
-                // Animate from the paint clock, not sim.t: the solver only
-                // advances 20 times a second, which made the arrows jump.
-                let clock = p.ctx().input(|i| i.time);
+                // Fixed arrowheads along the wire point the way conventional
+                // current runs. One sits at the middle of every wire; longer
+                // wires get more at an even spacing.
                 let length = polyline_length(&pts);
-                let spacing = 42.0;
-                let speed = 130.0 + (current.abs() as f32 * 5_000.0).min(130.0);
-                let mut phase = ((clock * speed as f64) % spacing as f64) as f32;
-                phase = (phase + (w.id % 17) as f32 * 7.0) % spacing;
-                if current < 0.0 {
-                    phase = spacing - phase;
-                }
-                let strength = (current.abs() as f32 * 1_000.0 / 20.0).clamp(0.25, 1.0);
-                let mut at = phase;
-                while at < length {
-                    if let Some((dot, mut direction)) = point_and_direction_along_polyline(&pts, at)
-                    {
+                let spacing = 60.0;
+                let count = ((length / spacing).floor() as i32).max(0) + 1;
+                let first = length * 0.5 - spacing * (count - 1) as f32 * 0.5;
+                for k in 0..count {
+                    let at = first + spacing * k as f32;
+                    if let Some((tip_mid, mut direction)) = point_and_direction_along_polyline(&pts, at) {
                         if current < 0.0 {
                             direction = -direction;
                         }
-                        p.circle_filled(
-                            dot,
-                            5.5,
-                            Color32::from_rgba_premultiplied(0x20, 0xC8, 0xFF, 55),
-                        );
                         let side = Vec2::new(-direction.y, direction.x);
                         p.add(Shape::convex_polygon(
                             vec![
-                                dot + direction * (4.8 + strength),
-                                dot - direction * 3.2 + side * 3.2,
-                                dot - direction * 3.2 - side * 3.2,
+                                tip_mid + direction * 7.0,
+                                tip_mid - direction * 5.0 + side * 6.0,
+                                tip_mid - direction * 5.0 - side * 6.0,
                             ],
-                            Color32::from_rgb(0xD8, 0xFA, 0xFF),
-                            Stroke::NONE,
+                            Color32::from_rgb(0xF4, 0xFD, 0xFF),
+                            Stroke::new(1.0, Color32::from_rgb(0x08, 0x40, 0x60)),
                         ));
                     }
-                    at += spacing;
                 }
             }
             if sel {
@@ -2687,7 +2675,7 @@ impl Schematic {
         }
         for at in &self.junction_cache {
             let s = self.view.to_screen(*at);
-            p.circle_filled(s, 4.0, WIRE);
+            p.circle_filled(s, 2.8, WIRE);
         }
     }
 
@@ -2817,7 +2805,7 @@ impl Schematic {
                 let s = self.view.to_screen(wp);
                 let connected = self.connected_pin_cache.contains(&(c.id, pin_index));
                 if connected {
-                    p.circle_filled(s, 2.6, WIRE);
+                    p.circle_filled(s, 1.8, WIRE);
                 } else {
                     p.circle_stroke(s, 2.6, Stroke::new(1.0, PIN));
                 }
