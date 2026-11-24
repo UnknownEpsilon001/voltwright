@@ -211,10 +211,10 @@ const EXAMPLES: &[Example] = &[
                 lights only when both inputs are high, OR when either is, and \
                 XOR when exactly one is.",
         parts: &[
-            part("PULSE", "VA", "PULSE(0 5 0 1m 1m 1 2)", -600.0, 15.0, 90),
-            part("PULSE", "VB", "PULSE(0 5 0 1m 1m 2 4)", -450.0, 65.0, 90),
-            part("GND", "GND1", "0V", -600.0, 140.0, 0),
-            part("GND", "GND2", "0V", -450.0, 190.0, 0),
+            part("PULSE", "VA", "PULSE(0 5 0 1m 1m 1 2)", -700.0, 15.0, 90),
+            part("PULSE", "VB", "PULSE(0 5 0 1m 1m 2 4)", -400.0, 65.0, 90),
+            part("GND", "GND1", "0V", -700.0, 140.0, 0),
+            part("GND", "GND2", "0V", -400.0, 190.0, 0),
             part("AND2", "U1", "AND2", -50.0, -150.0, 0),
             part("OR2", "U2", "OR2", -50.0, 100.0, 0),
             part("XOR2", "U3", "XOR2", -50.0, 350.0, 0),
@@ -250,10 +250,10 @@ const EXAMPLES: &[Example] = &[
                 Adding 1 + 1 lights only the carry LED: sum 0, carry 1 is \
                 binary 10, which is two.",
         parts: &[
-            part("PULSE", "VA", "PULSE(0 5 0 1m 1m 1 2)", -600.0, 15.0, 90),
-            part("PULSE", "VB", "PULSE(0 5 0 1m 1m 2 4)", -450.0, 65.0, 90),
-            part("GND", "GND1", "0V", -600.0, 140.0, 0),
-            part("GND", "GND2", "0V", -450.0, 190.0, 0),
+            part("PULSE", "VA", "PULSE(0 5 0 1m 1m 1 2)", -700.0, 15.0, 90),
+            part("PULSE", "VB", "PULSE(0 5 0 1m 1m 2 4)", -400.0, 65.0, 90),
+            part("GND", "GND1", "0V", -700.0, 140.0, 0),
+            part("GND", "GND2", "0V", -400.0, 190.0, 0),
             part("XOR2", "U1", "XOR2", -50.0, -125.0, 0),
             part("AND2", "U2", "AND2", -50.0, 125.0, 0),
             part("RESISTOR", "R1", "330R", 200.0, -125.0, 0),
@@ -488,6 +488,26 @@ const EXAMPLES: &[Example] = &[
             &[("R2", 1), ("GND2", 0)],
             &[("RE", 1), ("GND3", 0)],
             &[("V2", 1), ("GND4", 0)],
+        ],
+    },
+    Example {
+        name: "D flip-flop divide-by-two",
+        notes: "The inverted output QN is wired back to D, so Q flips on every                 rising clock edge and changes once per second while the clock                 runs at 1 Hz. This is the building block of binary counters.",
+        parts: &[
+            part("PULSE", "VC", "PULSE(0 5 0 1m 1m 0.5 1)", -300.0, 100.0, 90),
+            part("GND", "GND1", "0V", -300.0, 200.0, 0),
+            part("DFF", "U1", "DFF", 0.0, 0.0, 0),
+            part("RESISTOR", "R1", "330R", 240.0, -25.0, 0),
+            part("LED-GREEN", "D1", "Q", 300.0, 35.0, 90),
+            part("GND", "GND2", "0V", 300.0, 140.0, 0),
+        ],
+        nets: &[
+            &[("VC", 0), ("U1", 1)],
+            &[("U1", 2), ("U1", 0)],
+            &[("U1", 3), ("R1", 0)],
+            &[("R1", 1), ("D1", 0)],
+            &[("D1", 1), ("GND2", 0)],
+            &[("VC", 1), ("GND1", 0)],
         ],
     },
     Example {
@@ -779,6 +799,23 @@ mod tests {
         let mid = (lo + hi) * 0.5;
         assert!(mid > 6.5 && mid < 11.0, "collector rests at {mid} V");
         assert!(hi - lo > 0.6, "collector swing {} V", hi - lo);
+    }
+
+    #[test]
+    fn flip_flop_divides_the_clock_by_two() {
+        let lib = Library::builtin();
+        let proj = build("D flip-flop divide-by-two", &lib).unwrap();
+        let mut sim = Simulator::from_project(&proj, &lib).unwrap();
+        sim.solve_dc().unwrap();
+        let mut at = |t: f64| {
+            while sim.t < t {
+                sim.step(0.05).unwrap();
+            }
+            sim.led_level("D1") > 0.05
+        };
+        assert!(at(0.3), "first rising edge sets Q");
+        assert!(!at(1.3), "second edge clears it");
+        assert!(at(2.3), "third edge sets it again");
     }
 
     #[test]

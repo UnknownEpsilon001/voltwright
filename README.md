@@ -32,7 +32,7 @@ It is early work. Expect rough edges and file-format changes.
   divider, transistor switch, RC charging, op-amp amplifier, diode
   rectifier, 555 timer LED blinker, op-amp voltage follower, RC low-pass
   filter, and logic gate circuits (NAND truth table, AND/OR/XOR, half adder,
-  SR latch), plus a smoothing rectifier, inverting amplifier, series RLC
+  SR latch, D flip-flop divider), plus a smoothing rectifier, inverting amplifier, series RLC
   resonance and common-emitter amplifier. AND, OR, XOR, NAND, NOR, XNOR, NOT and buffer gates are simulated
   as 5 V logic.
 - CNC export (File > Export): G-code for GRBL-style routers in millimetres -
@@ -40,7 +40,7 @@ It is early work. Expect rough edges and file-format changes.
   multi-pass board outline cut. Bit sizes, depths and feeds are set in the
   dialog. Round pads are assumed for isolation, and only the top layer is cut.
 - Instruments: voltmeter and ammeter parts with live readouts, a signal
-  generator, and a frequency counter, a logic probe, and a four-channel oscilloscope with a floating trace window
+  generator, and a frequency counter, a logic probe, and a four-channel oscilloscope with a floating CRT-style window (knobs for time/div, volts/div, position and trigger level, RUN/STOP, AC coupling)
   (Tools > Oscilloscope; it opens when a simulation with a scope part runs).
 - Import of `.pdsprj` projects. Voltwright brings across the parts it has
   models for, rebuilds the nets and reroutes the wires; it lists anything it

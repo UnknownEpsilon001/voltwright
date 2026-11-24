@@ -188,6 +188,8 @@ pub struct Schematic {
     pub hot_pin: Option<PinRef>,
     /// Component under the cursor. Hover never changes selection or state.
     pub hot_comp: Option<u64>,
+    menu_world: P,
+    drag_last_delta: Option<P>,
     pub mouse: P,
     pub hint: String,
     /// 0 = dots, 1 = lines, 2 = off (cycled with G).
@@ -240,6 +242,8 @@ impl Default for Schematic {
             wire_free: false,
             hot_pin: None,
             hot_comp: None,
+            menu_world: P::ZERO,
+            drag_last_delta: None,
             mouse: P::ZERO,
             hint: "Ready".into(),
             grid_mode: 0,
@@ -1109,12 +1113,26 @@ impl Schematic {
     }
 
     fn refresh_attached_wires(proj: &mut Project, lib: &Library, moved: &HashSet<u64>) {
+        let plans = Self::plan_attached_wires(proj, lib, moved);
+        for (id, pts) in plans {
+            if let Some(w) = proj.wires.iter_mut().find(|w| w.id == id) {
+                if w.pts != pts && pts.len() >= 2 {
+                    w.pts = pts;
+                    proj.dirty = true;
+                }
+            }
+        }
+    }
+
+    /// The route every wire attached to a moved part will take. The drag
+    /// preview and the final result both come from here, so the wire does not
+    /// change shape when the mouse is released.
+    fn plan_attached_wires(proj: &Project, lib: &Library, moved: &HashSet<u64>) -> Vec<(u64, Vec<P>)> {
         if moved.is_empty() {
-            return;
+            return Vec::new();
         }
         let obstacles = Self::component_obstacles(proj, lib);
-        let plans: Vec<(u64, Vec<P>)> = proj
-            .wires
+        proj.wires
             .iter()
             .filter_map(|w| {
                 let attached = w.start_pin.map(|p| moved.contains(&p.0)).unwrap_or(false)
@@ -1158,15 +1176,7 @@ impl Schematic {
                     Self::route_anchored_skipping(proj, lib, &points, horizontal, Some(w.id)),
                 ))
             })
-            .collect();
-        for (id, pts) in plans {
-            if let Some(w) = proj.wires.iter_mut().find(|w| w.id == id) {
-                if w.pts != pts && pts.len() >= 2 {
-                    w.pts = pts;
-                    proj.dirty = true;
-                }
-            }
-        }
+            .collect()
     }
 
     /// During a drag, keep attached wires visually stable with a simple
@@ -1178,51 +1188,7 @@ impl Schematic {
         lib: &Library,
         moved: &HashSet<u64>,
     ) -> HashMap<u64, Vec<P>> {
-        if moved.is_empty() {
-            return HashMap::new();
-        }
-        proj.wires
-            .iter()
-            .filter_map(|wire| {
-                let attached = wire
-                    .start_pin
-                    .map(|pin| moved.contains(&pin.0))
-                    .unwrap_or(false)
-                    || wire
-                        .end_pin
-                        .map(|pin| moved.contains(&pin.0))
-                        .unwrap_or(false);
-                if !attached || wire.pts.len() < 2 {
-                    return None;
-                }
-                if let Some(route) = Self::stretch_wire(proj, lib, wire) {
-                    return Some((wire.id, route));
-                }
-                let start = wire
-                    .start_pin
-                    .and_then(|pin| Self::pin_position(proj, lib, pin))
-                    .unwrap_or(wire.pts[0]);
-                let end = wire
-                    .end_pin
-                    .and_then(|pin| Self::pin_position(proj, lib, pin))
-                    .unwrap_or(*wire.pts.last().unwrap());
-                let horizontal = wire
-                    .start_pin
-                    .map(|pin| Self::pin_horizontal(proj, lib, pin))
-                    .unwrap_or(true);
-                let corner = if horizontal {
-                    P::new(end.x, start.y)
-                } else {
-                    P::new(start.x, end.y)
-                };
-                let mut pts = vec![start];
-                if corner.dist(start) > 0.5 && corner.dist(end) > 0.5 {
-                    pts.push(corner);
-                }
-                pts.push(end);
-                Some((wire.id, pts))
-            })
-            .collect()
+        Self::plan_attached_wires(proj, lib, moved).into_iter().collect()
     }
 
     /// Re-route wires that a newly placed or moved component landed on.
@@ -1984,7 +1950,12 @@ impl Schematic {
                                     l.y = np.y;
                                 }
                             }
-                            if !moved.is_empty() {
+                            // The route only depends on where the parts sit, so it
+                            // is worked out again only when they step to a new spot.
+                            if !moved.is_empty()
+                                && (self.drag_last_delta != Some(delta) || self.drag_wire_paths.is_empty())
+                            {
+                                self.drag_last_delta = Some(delta);
                                 self.drag_wire_paths =
                                     Self::attached_wire_previews(proj, lib, &moved);
                             }
@@ -2017,6 +1988,7 @@ impl Schematic {
                 Self::repair_obstructed_wires(proj, lib);
             }
             self.drag_wire_paths.clear();
+            self.drag_last_delta = None;
             self.drag = None;
         }
 
@@ -2051,7 +2023,12 @@ impl Schematic {
         // Right-click context menu. Wiring and placement consume the right
         // click, so they must not also open the menu in the same frame.
         if !wire_active && !placement_active {
-            let menu_w = self.mouse;
+            // The menu belongs to whatever was under the pointer when it was
+            // opened, not to whatever the pointer passes over afterwards.
+            if resp.secondary_clicked() {
+                self.menu_world = self.mouse;
+            }
+            let menu_w = self.menu_world;
             resp.context_menu(|ui| {
                 self.context_menu(ui, proj, lib, menu_w);
             });
@@ -2415,7 +2392,7 @@ impl Schematic {
             let current = running_sim
                 .map(|sm| wire_current_with_netlist(proj, w, sm, netlist))
                 .unwrap_or(0.0);
-            let flowing = current.abs() > 1.0e-9;
+            let flowing = current.abs() > 1.0e-6;
             if flowing && !sel {
                 p.add(Shape::line(
                     pts.clone(),
@@ -2710,7 +2687,12 @@ impl Schematic {
                     _ => &[],
                 };
                 pins.extend(body.iter().map(|q| c.pos().add(q.rot(c.rot))));
-                let pad = if body.is_empty() { 40.0 } else { 8.0 };
+                let mut pad = if body.is_empty() { 40.0 } else { 8.0 };
+                // Box the drawn symbol, not a margin around its pins.
+                if let Some((lo, hi)) = symbol_extent(def) {
+                    pins = [lo, hi].iter().map(|q| c.pos().add(q.rot(c.rot))).collect();
+                    pad = 6.0;
+                }
                 if let Some(r) = bbox_of(&pins, pad) {
                     let a = self.view.to_screen(P::new(r.min.x, r.min.y));
                     let b = self.view.to_screen(P::new(r.max.x, r.max.y));
@@ -2883,7 +2865,7 @@ fn wire_current_with_netlist(
     proj: &Project,
     wire: &Wire,
     sim: &Simulator,
-    netlist: Option<&Netlist>,
+    _netlist: Option<&Netlist>,
 ) -> f64 {
     [(wire.start_pin, true), (wire.end_pin, false)]
         .into_iter()
@@ -2909,23 +2891,9 @@ fn wire_current_with_netlist(
             })
         })
         .max_by(|a, b| a.abs().total_cmp(&b.abs()))
-        .unwrap_or_else(|| {
-            let Some(netlist) = netlist else {
-                return 0.0;
-            };
-            let voltage = [wire.start_pin, wire.end_pin]
-                .into_iter()
-                .flatten()
-                .filter_map(|(component, pin)| netlist.net_of(component, pin))
-                .filter_map(|net| sim.voltage(net))
-                .map(f64::abs)
-                .fold(0.0, f64::max);
-            if voltage > 0.05 {
-                1.0e-6
-            } else {
-                0.0
-            }
-        })
+        // A wire with no simulated part on either end carries no known
+        // current, so it shows no arrows.
+        .unwrap_or(0.0)
 }
 
 fn wire_current(proj: &Project, lib: &Library, wire: &Wire, sim: &Simulator) -> f64 {
@@ -3083,6 +3051,31 @@ fn lead_reach(symbol: Symbol) -> Option<(f32, f32)> {
         Symbol::Meter => (30.0, 30.0),
         _ => return None,
     })
+}
+
+/// Local extent (top-left, bottom-right) of what a symbol draws, for the
+/// selection and hover boxes. None means "use the pins".
+fn symbol_extent(def: &crate::model::PartDef) -> Option<(P, P)> {
+    let (x0, y0, x1, y1) = match def.symbol {
+        Symbol::Resistor | Symbol::Pot | Symbol::Fuse => (-38.0, -14.0, 38.0, 14.0),
+        Symbol::Capacitor | Symbol::PolarCap => (-12.0, -26.0, 12.0, 26.0),
+        Symbol::Inductor => (-40.0, -16.0, 40.0, 10.0),
+        Symbol::Diode => (-26.0, -28.0, 28.0, 28.0),
+        Symbol::Led => (-26.0, -52.0, 40.0, 28.0),
+        Symbol::Battery => (-14.0, -28.0, 14.0, 28.0),
+        Symbol::Lamp | Symbol::Motor | Symbol::Speaker | Symbol::Source | Symbol::Meter => (-36.0, -36.0, 36.0, 36.0),
+        Symbol::Xtal => (-26.0, -26.0, 26.0, 26.0),
+        Symbol::Switch => (-38.0, -36.0, 38.0, 8.0),
+        Symbol::Button => (-38.0, -38.0, 38.0, 8.0),
+        Symbol::Npn | Symbol::Pnp => (-68.0, -60.0, 52.0, 60.0),
+        Symbol::Nmos | Symbol::Pmos => (-68.0, -40.0, 52.0, 40.0),
+        Symbol::OpAmp => (-90.0, -75.0, 90.0, 75.0),
+        Symbol::Gate => (-90.0, -50.0, 90.0, 50.0),
+        Symbol::Scope => (-90.0, -95.0, 70.0, 95.0),
+        Symbol::Tap => (-60.0, -24.0, 70.0, 24.0),
+        _ => return None,
+    };
+    Some((P::new(x0, y0), P::new(x1, y1)))
 }
 
 pub const SCOPE_COLORS: [Color32; 4] = [
@@ -3368,8 +3361,19 @@ fn draw_component(
                             } else {
                                 led_color
                             };
-                            let badge =
-                                Rect::from_min_size(s(P::new(-54.0, 42.0)), Vec2::new(198.0, 22.0));
+                            // Beside a vertical LED the badge sits under its labels;
+                            // beside a flat one it goes below the symbol.
+                            let badge_at = if c.rot.rem_euclid(180) == 90 {
+                                let right = [P::new(-26.0, -52.0), P::new(40.0, 28.0)]
+                                    .iter()
+                                    .map(|q| q.rot(c.rot).x)
+                                    .fold(f32::MIN, f32::max);
+                                let at = v.to_screen(o);
+                                Pos2::new(at.x + (right + 8.0) * v.zoom, at.y + 20.0)
+                            } else {
+                                s(P::new(-54.0, 42.0))
+                            };
+                            let badge = Rect::from_min_size(badge_at, Vec2::new(198.0, 22.0));
                             p.rect_filled(
                                 badge,
                                 4.0,
@@ -3503,6 +3507,18 @@ fn draw_component(
             if inverted {
                 p.add(Shape::circle_stroke(s(P::new(tip + 6.0, 0.0)), 6.0 * v.zoom, stroke));
                 tip += 12.0;
+            }
+            // While the simulation runs, a small square on every pin shows its
+            // logic level: red for high, blue for low.
+            if let Some(el) = sim.filter(|sm| sm.running).and_then(|sm| sm.element(&c.refdes).map(|e| (sm, e))) {
+                let (sm, el) = el;
+                for (pd, node) in def.pins.iter().zip(el.pins.iter()) {
+                    let high = sm.v.get(*node).copied().unwrap_or(0.0) > 2.5;
+                    let color = if high { Color32::from_rgb(0xFF, 0x40, 0x40) } else { Color32::from_rgb(0x40, 0x90, 0xFF) };
+                    let at = s(P::new(pd.pos.x - pd.pos.x.signum() * 10.0, pd.pos.y));
+                    let half = 5.0 * v.zoom.max(0.8);
+                    p.rect_filled(Rect::from_center_size(at, Vec2::splat(half * 2.0)), 1.0, color);
+                }
             }
             line(p, s(P::new(tip, 0.0)), s(P::new(90.0, 0.0)), ink, thin);
             if matches!(id, "NOT" | "BUF") {
@@ -3884,6 +3900,38 @@ fn draw_component(
     let text_scale = c
         .text_size
         .map(|(height, _)| (height as f32 / 20.0).clamp(4.0, 96.0));
+    // A part turned on its side would put the text on top of its own symbol,
+    // so its labels go to the right of the drawing instead.
+    let side = if c.rot.rem_euclid(180) == 90 {
+        symbol_extent(def).map(|(lo, hi)| {
+            let right = [lo, hi].iter().map(|q| q.rot(c.rot).x).fold(f32::MIN, f32::max);
+            let at = v.to_screen(o);
+            Pos2::new(at.x + (right + 8.0) * v.zoom, at.y)
+        })
+    } else {
+        None
+    };
+    if let Some(at) = side {
+        if show_text && !hidden("REF") && !hidden("REFERENCE") && !c.refdes.is_empty() {
+            p.text(
+                at + Vec2::new(0.0, -2.0),
+                egui::Align2::LEFT_BOTTOM,
+                c.refdes.clone(),
+                FontId::new(text_scale.unwrap_or(13.0), FontFamily::Proportional),
+                Color32::from_rgb(0xE8, 0xE8, 0xE8),
+            );
+        }
+        if show_text && !hidden("VALUE") && !c.value.is_empty() && def.symbol != Symbol::Ic {
+            p.text(
+                at + Vec2::new(0.0, 2.0),
+                egui::Align2::LEFT_TOP,
+                c.value.clone(),
+                FontId::new(text_scale.unwrap_or(12.0), FontFamily::Proportional),
+                Color32::from_rgb(0xC8, 0xD8, 0xC8),
+            );
+        }
+        return;
+    }
     if show_text && !hidden("REF") && !hidden("REFERENCE") && !c.refdes.is_empty() {
         let top = def.pins.iter().map(|pd| pd.pos.y).fold(0.0f32, f32::min);
         let anchor = match def.symbol {

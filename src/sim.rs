@@ -184,6 +184,8 @@ pub enum Gate {
     Xnor,
     Not,
     Buf,
+    /// D flip-flop; pins D, CLK, QN, Q.
+    Dff,
 }
 
 impl Gate {
@@ -196,6 +198,7 @@ impl Gate {
             "XNOR2" => Gate::Xnor,
             "NOT" => Gate::Not,
             "BUF" => Gate::Buf,
+            "DFF" => Gate::Dff,
             _ => Gate::And,
         }
     }
@@ -208,7 +211,7 @@ impl Gate {
             Gate::Xor => a != b,
             Gate::Xnor => a == b,
             Gate::Not => !a,
-            Gate::Buf => a,
+            Gate::Buf | Gate::Dff => a,
         }
     }
 }
@@ -230,6 +233,8 @@ pub struct El {
     pub fault: Option<String>,
     /// Output latch of a timer; unused by other elements.
     pub latched: bool,
+    /// Previous clock level of an edge-triggered part.
+    pub aux: bool,
 }
 
 impl El {
@@ -404,6 +409,7 @@ impl Simulator {
                 temperature_c: AMBIENT_TEMPERATURE_C,
                 fault: None,
                 latched: true,
+                aux: false,
             });
         }
 
@@ -434,6 +440,7 @@ impl Simulator {
                         temperature_c: AMBIENT_TEMPERATURE_C,
                         fault: None,
                         latched: true,
+                        aux: false,
                     });
                 }
             }
@@ -528,7 +535,7 @@ impl Simulator {
                 .and_then(|b| self.branch.get(b).copied())
                 .unwrap_or(0.0),
             Kind::I { wave } => wave.eval(self.t),
-            Kind::Sw { on } => (va - vb) * if *on { 2.0 } else { 1e-6 },
+            Kind::Sw { on } => (va - vb) * if *on { 2.0 } else { 1e-9 },
             // Non-linear devices have no matrix branch. Their current comes
             // from the same linearisation the solver stamped into the matrix.
             Kind::D => {
@@ -800,6 +807,17 @@ impl Simulator {
                     driven.get(&n).copied().unwrap_or_else(|| v.get(n).copied().unwrap_or(0.0) > 2.5)
                 };
                 let n = e.pins.len();
+                if g == Gate::Dff && n >= 4 {
+                    // Q takes D on a rising clock edge.
+                    let clk = high(1);
+                    if clk && !e.aux {
+                        e.latched = high(0);
+                    }
+                    e.aux = clk;
+                    driven.insert(e.pins[3], e.latched);
+                    driven.insert(e.pins[2], !e.latched);
+                    continue;
+                }
                 if n >= 2 {
                     let b = if n >= 3 { high(1) } else { false };
                     e.latched = g.eval(high(0), b);
@@ -1129,7 +1147,7 @@ fn solve(sim: &mut Simulator, dt: Option<f64>, t: f64) -> Result<(Vec<f64>, Vec<
                     stamp_i(&mut m, ua, ub, ieq);
                 }
                 Kind::Sw { on } => {
-                    let g = if *on { 2.0 } else { 1e-6 };
+                    let g = if *on { 2.0 } else { 1e-9 };
                     stamp_g(&mut m, ua, ub, g);
                 }
                 Kind::Npn => {
@@ -1180,12 +1198,17 @@ fn solve(sim: &mut Simulator, dt: Option<f64>, t: f64) -> Result<(Vec<f64>, Vec<
                         stamp_g(&mut m, dis, gnd, g);
                     }
                 }
-                Kind::Logic(_) => {
-                    if let Some(&out) = e.pins.last() {
+                Kind::Logic(gate) => {
+                    let outs: Vec<(usize, bool)> = if *gate == Gate::Dff && e.pins.len() >= 4 {
+                        vec![(e.pins[3], e.latched), (e.pins[2], !e.latched)]
+                    } else {
+                        e.pins.last().map(|&o| (o, e.latched)).into_iter().collect()
+                    };
+                    for (out, high) in outs {
                         // Output stage: 50 ohms to 5 V or to 0 V.
                         let g = 0.02;
                         stamp_g(&mut m, unknown(out), None, g);
-                        if e.latched {
+                        if high {
                             stamp_i(&mut m, None, unknown(out), g * 5.0);
                         }
                     }

@@ -112,6 +112,13 @@ fn transistor(
 }
 
 pub fn add_all(p: &mut Vec<PartDef>) {
+    // ---- Sequential logic (simulated, 5 V) ---------------------------
+    {
+        let mut ff = named_part("DFF", "D FLIP-FLOP", "Logic Gates", "DEVICE", "DIL-14", "DFF", "U", named_dual_row_pins(&["D", "CLK", "QN", "Q"], 120.0));
+        ff.sim = SimKind::Logic;
+        add(p, ff);
+    }
+
     // ---- Instruments ----------------------------------------------------
     for (id, name) in [("VOLTMETER", "DC VOLTMETER"), ("AMMETER", "DC AMMETER")] {
         add(p, two_pin(id, name, "Instruments", "DEVICE", "NONE", Symbol::Meter, SimKind::R, "", "PM"));
