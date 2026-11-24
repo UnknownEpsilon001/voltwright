@@ -41,6 +41,18 @@ pub struct RouteResult {
     pub failed: Vec<String>,
 }
 
+/// Clamp a size read from a project file to something the grid can hold.
+fn sane(v: f32) -> f32 {
+    if v.is_finite() {
+        v.clamp(0.0, 20_000.0)
+    } else {
+        0.0
+    }
+}
+
+/// Largest grid the router will build, in cells per layer.
+const MAX_CELLS: usize = 4_000_000;
+
 const FREE: u16 = 0;
 const BLOCK: u16 = u16::MAX - 1;
 const MULTI: u16 = u16::MAX;
@@ -84,15 +96,15 @@ impl Grid {
     /// Mark everything within `reach` of a point: cells close to its centre
     /// belong to the net, the ring out to `block` is its clearance halo.
     fn stamp_disc(&mut self, layers: &[usize], c: P, block: f32, net: u16) {
-        let r = (block / self.g).ceil() as i32 + 1;
+        // Sizes come from the project file, so bound everything by the grid.
+        if !c.x.is_finite() || !c.y.is_finite() {
+            return;
+        }
+        let block = sane(block);
+        let r = ((block / self.g).ceil() as usize + 1).min(self.cols + self.rows);
         let (cx, cy) = self.nearest(c);
-        for dy in -r..=r {
-            for dx in -r..=r {
-                let (x, y) = (cx as i32 + dx, cy as i32 + dy);
-                if x < 0 || y < 0 || x >= self.cols as i32 || y >= self.rows as i32 {
-                    continue;
-                }
-                let (x, y) = (x as usize, y as usize);
+        for y in cy.saturating_sub(r)..=(cy + r).min(self.rows - 1) {
+            for x in cx.saturating_sub(r)..=(cx + r).min(self.cols - 1) {
                 let d = self.centre(x, y).dist(c);
                 let i = self.idx(x, y);
                 for &l in layers {
@@ -110,8 +122,11 @@ impl Grid {
         }
     }
     fn stamp_segment(&mut self, layer: usize, a: P, b: P, block: f32, net: u16) {
+        if !a.x.is_finite() || !a.y.is_finite() || !b.x.is_finite() || !b.y.is_finite() {
+            return;
+        }
         let len = a.dist(b);
-        let steps = (len / (self.g * 0.5)).ceil().max(1.0) as usize;
+        let steps = ((len / (self.g * 0.5)).ceil().max(1.0) as usize).min(2 * (self.cols + self.rows));
         for s in 0..=steps {
             let t = s as f32 / steps as f32;
             let p = P::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
@@ -130,9 +145,25 @@ struct PadRef {
 
 pub fn route(proj: &Project, par: &RouteParams) -> RouteResult {
     let (o, e) = proj.board.rect();
-    let g = par.grid;
-    let cols = ((e.x - o.x) / g).floor() as usize + 1;
-    let rows = ((e.y - o.y) / g).floor() as usize + 1;
+    let g = par.grid.max(1.0);
+    let too_big = !(e.x - o.x).is_finite() || !(e.y - o.y).is_finite() || e.x <= o.x || e.y <= o.y;
+    let (cols, rows) = if too_big {
+        (0, 0)
+    } else {
+        (
+            (((e.x - o.x) / g).floor().min(1.0e6) as usize) + 1,
+            (((e.y - o.y) / g).floor().min(1.0e6) as usize) + 1,
+        )
+    };
+    if too_big || cols.saturating_mul(rows) > MAX_CELLS {
+        return RouteResult {
+            tracks: Vec::new(),
+            vias: Vec::new(),
+            connections: 1,
+            routed: 0,
+            failed: vec!["(the board outline is empty or too large for the router)".to_string()],
+        };
+    }
     let n = cols * rows;
     let mut grid = Grid {
         cols,
@@ -183,7 +214,7 @@ pub fn route(proj: &Project, par: &RouteParams) -> RouteResult {
             let net = pad.net.as_ref().and_then(|nm| ids.get(nm).copied()).unwrap_or_else(&mut lone_id);
             let through = pad.drill > 0.0;
             let layers: &[usize] = if through { &[0, 1] } else { &[0] };
-            let radius = pad.size * 0.5;
+            let radius = sane(pad.size) * 0.5;
             grid.stamp_disc(layers, at, radius + par.clearance + half_w, net);
             pads.push(PadRef { net, at, radius, through, cell: grid.nearest(at) });
         }
@@ -193,12 +224,12 @@ pub fn route(proj: &Project, par: &RouteParams) -> RouteResult {
         let net = t.net.as_ref().and_then(|nm| ids.get(nm).copied()).unwrap_or_else(&mut lone_id);
         let l = if t.layer == Layer::BottomCopper { 1 } else { 0 };
         if t.layer == Layer::TopCopper || t.layer == Layer::BottomCopper {
-            grid.stamp_segment(l, t.a, t.b, t.width * 0.5 + par.clearance + half_w, net);
+            grid.stamp_segment(l, t.a, t.b, sane(t.width) * 0.5 + par.clearance + half_w, net);
         }
     }
     for v in &proj.vias {
         let net = v.net.as_ref().and_then(|nm| ids.get(nm).copied()).unwrap_or_else(&mut lone_id);
-        grid.stamp_disc(&[0, 1], v.pos, v.size * 0.5 + par.clearance + half_w, net);
+        grid.stamp_disc(&[0, 1], v.pos, sane(v.size) * 0.5 + par.clearance + half_w, net);
     }
     // A pad's own access cell must belong to its net.
     for p in &pads {
@@ -730,5 +761,29 @@ mod tests {
         let again = route(&proj, &RouteParams::default());
         assert_eq!(again.connections, 0, "everything is already connected");
         assert!(again.tracks.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod hostile_input {
+    use super::*;
+    use crate::model::Library;
+
+    #[test]
+    fn absurd_sizes_and_boards_do_not_hang_or_panic() {
+        let lib = Library::builtin();
+        let mut proj = crate::examples::build("LED with current-limiting resistor", &lib).unwrap();
+        let nl = proj.netlist(&lib);
+        proj.sync_pcb(&lib, &nl);
+        proj.board.width = 2000.0;
+        proj.board.height = 1500.0;
+        proj.fps[0].pads[0].size = f32::INFINITY;
+        proj.fps[0].pads[1].size = 1.0e30;
+        proj.vias.push(Via { id: 99, pos: P::new(500.0, 500.0), size: f32::NAN, drill: 1.0, net: None });
+        proj.tracks.push(Track { id: 98, a: P::new(0.0, 0.0), b: P::new(1.0e30, 5.0), width: -5.0, layer: Layer::TopCopper, net: None });
+        let _ = route(&proj, &RouteParams::default());
+        proj.board.width = 1.0e12;
+        let res = route(&proj, &RouteParams::default());
+        assert!(!res.failed.is_empty(), "an oversized board is refused");
     }
 }
