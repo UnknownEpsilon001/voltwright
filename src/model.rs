@@ -50,8 +50,15 @@ impl P {
         self.sub(o).len()
     }
     /// Rotate by a multiple of 90 degrees, clockwise (screen Y grows down).
+    /// Rotate by `deg` clockwise. A value of 360 or more means the part is
+    /// mirrored left to right first, so one number carries rotation and flip.
     pub fn rot(self, deg: i32) -> P {
-        match deg.rem_euclid(360) {
+        let d = deg.rem_euclid(720);
+        let (q, d) = if d >= 360 { (P { x: -self.x, y: self.y }, d - 360) } else { (self, d) };
+        q.rot_plain(d)
+    }
+    fn rot_plain(self, deg: i32) -> P {
+        match deg {
             90 => P {
                 x: -self.y,
                 y: self.x,
@@ -1609,6 +1616,22 @@ impl Component {
     pub fn pos(&self) -> P {
         P::new(self.x, self.y)
     }
+    pub fn mirrored(&self) -> bool {
+        self.rot.rem_euclid(720) >= 360
+    }
+}
+
+/// Turn a rotation value (see `P::rot`) by `step` degrees on screen, keeping
+/// the mirror flag.
+pub fn rot_add(rot: i32, step: i32) -> i32 {
+    let flag = if rot.rem_euclid(720) >= 360 { 360 } else { 0 };
+    (rot.rem_euclid(360) + step).rem_euclid(360) + flag
+}
+
+/// Flip a rotation value left to right on screen.
+pub fn rot_mirror(rot: i32) -> i32 {
+    let flag = if rot.rem_euclid(720) >= 360 { 0 } else { 360 };
+    (360 - rot.rem_euclid(360)).rem_euclid(360) + flag
 }
 
 #[derive(Clone, Debug)]

@@ -178,6 +178,7 @@ pub struct Schematic {
     pub sel: HashSet<u64>,
     pub sel_wire: HashSet<u64>,
     pub sel_label: HashSet<u64>,
+    clip: Option<Clip>,
     /// Anchors/vertices of the wire currently being placed.
     pub draft: Vec<P>,
     /// The pin the wire started on, if any.
@@ -237,6 +238,7 @@ impl Default for Schematic {
             sel: HashSet::new(),
             sel_wire: HashSet::new(),
             sel_label: HashSet::new(),
+            clip: None,
             draft: Vec::new(),
             draft_pin: None,
             wire_free: false,
@@ -547,7 +549,7 @@ impl Schematic {
         let p = Self::pin_position(proj, lib, pin)?;
         let c = proj.comp(pin.0)?;
         let pd = lib.get(&c.part)?.pins.get(pin.1)?;
-        let step = P::new(WIRE_STUB, 0.0).rot(pd.dir + c.rot);
+        let step = P::new(WIRE_STUB, 0.0).rot(pd.dir).rot(c.rot);
         Some(p.add(step))
     }
 
@@ -1255,7 +1257,7 @@ impl Schematic {
 
     fn rotate_components(proj: &mut Project, lib: &Library, ids: &HashSet<u64>, step: i32) {
         for c in proj.comps.iter_mut().filter(|c| ids.contains(&c.id)) {
-            c.rot = (c.rot + step).rem_euclid(360);
+            c.rot = crate::model::rot_add(c.rot, step);
         }
         Self::refresh_attached_wires(proj, lib, ids);
         Self::repair_obstructed_wires(proj, lib);
@@ -1407,6 +1409,15 @@ impl Schematic {
                 let mut ids = HashSet::new();
                 ids.insert(id);
                 Self::rotate_components(proj, lib, &ids, 90);
+            }
+            if ui.button("Mirror (M)").clicked() {
+                let mut ids = HashSet::new();
+                ids.insert(id);
+                Self::mirror_components(proj, lib, &ids);
+            }
+            if ui.button("Copy (Ctrl+C)").clicked() {
+                self.sel.insert(id);
+                self.copy_selection(proj);
             }
             if ui.button("Delete (Del)").clicked() {
                 let mut ids = HashSet::new();
@@ -1586,6 +1597,11 @@ impl Schematic {
         let mut centre = false;
         let mut false_origin_toggle = false;
         let mut x_cursor_toggle = false;
+        let mut mirror_key = false;
+        let mut copy_ev = false;
+        let mut cut_ev = false;
+        let mut paste_ev = false;
+        let mut nudge = (0i32, 0i32);
         let mut snap: Option<usize> = None;
         let mut redraw = false;
         let placing = self.pending.is_some();
@@ -1606,7 +1622,20 @@ impl Schematic {
             edit = i.key_pressed(egui::Key::Enter);
             grid_toggle = i.key_pressed(egui::Key::G);
             false_origin_toggle = i.key_pressed(egui::Key::O);
-            x_cursor_toggle = i.key_pressed(egui::Key::X);
+            x_cursor_toggle = !ctrl && i.key_pressed(egui::Key::X);
+            mirror_key = !ctrl && i.key_pressed(egui::Key::M);
+            for e in &i.events {
+                match e {
+                    egui::Event::Copy => copy_ev = true,
+                    egui::Event::Cut => cut_ev = true,
+                    egui::Event::Paste(_) => paste_ev = true,
+                    _ => {}
+                }
+            }
+            if !ctrl {
+                nudge.0 = i.key_pressed(egui::Key::ArrowRight) as i32 - i.key_pressed(egui::Key::ArrowLeft) as i32;
+                nudge.1 = i.key_pressed(egui::Key::ArrowDown) as i32 - i.key_pressed(egui::Key::ArrowUp) as i32;
+            }
             fit = i.key_pressed(egui::Key::F8);
             zoom_in = i.key_pressed(egui::Key::F6);
             zoom_out = i.key_pressed(egui::Key::F7);
@@ -1643,9 +1672,34 @@ impl Schematic {
             self.drag = None;
             self.drag_wire_paths.clear();
         }
+        if mirror_key && self.pending.is_some() {
+            self.pending_rot = crate::model::rot_mirror(self.pending_rot);
+            self.hint = "Placement mirrored".into();
+        } else if mirror_key && !self.sel.is_empty() {
+            let ids = self.sel.clone();
+            Self::mirror_components(proj, lib, &ids);
+            self.hint = "Mirrored".into();
+        }
+        if copy_ev || cut_ev {
+            if self.copy_selection(proj) {
+                self.hint = format!("Copied {} part(s)", self.clip.as_ref().map_or(0, |c| c.comps.len()));
+                if cut_ev {
+                    self.delete_selection(proj, lib);
+                    self.hint = "Cut".into();
+                }
+            }
+        }
+        if paste_ev && self.clip.is_some() && self.pending.is_none() {
+            let at = self.snap(proj, self.mouse);
+            let n = self.paste(proj, lib, at);
+            self.hint = format!("Pasted {n} part(s)");
+        }
+        if (nudge.0 != 0 || nudge.1 != 0) && self.pending.is_none() && self.drag.is_none() && !self.sel.is_empty() {
+            let step = self.snap_step(proj).max(1.0);
+            Self::nudge_selection(self, proj, lib, nudge.0 as f32 * step, nudge.1 as f32 * step);
+        }
         if (rotate || rotate_ccw) && self.pending.is_some() {
-            self.pending_rot =
-                (self.pending_rot + if rotate_ccw { -90 } else { 90 }).rem_euclid(360);
+            self.pending_rot = crate::model::rot_add(self.pending_rot, if rotate_ccw { -90 } else { 90 });
             self.hint = format!("Placement rotation {}°", self.pending_rot);
         }
         if grid_toggle {
@@ -2230,6 +2284,99 @@ impl Schematic {
             ids.insert(id);
             Self::remove_components(proj, lib, &ids);
         }
+    }
+
+    /// Flip the selected parts left to right on screen.
+    fn mirror_components(proj: &mut Project, lib: &Library, ids: &HashSet<u64>) {
+        for c in proj.comps.iter_mut().filter(|c| ids.contains(&c.id)) {
+            c.rot = crate::model::rot_mirror(c.rot);
+        }
+        Self::refresh_attached_wires(proj, lib, ids);
+        Self::repair_obstructed_wires(proj, lib);
+        proj.dirty = true;
+    }
+
+    /// Move the selection by whole grid steps with the arrow keys.
+    fn nudge_selection(&mut self, proj: &mut Project, lib: &Library, dx: f32, dy: f32) {
+        let ids = self.sel.clone();
+        for c in proj.comps.iter_mut().filter(|c| ids.contains(&c.id)) {
+            c.x += dx;
+            c.y += dy;
+        }
+        for l in proj.labels.iter_mut().filter(|l| self.sel_label.contains(&l.id)) {
+            l.x += dx;
+            l.y += dy;
+        }
+        Self::refresh_attached_wires(proj, lib, &ids);
+        Self::repair_obstructed_wires(proj, lib);
+        proj.dirty = true;
+    }
+
+    /// Remember the selected parts, labels and the wires between them.
+    fn copy_selection(&mut self, proj: &Project) -> bool {
+        let comps: Vec<Component> = proj.comps.iter().filter(|c| self.sel.contains(&c.id)).cloned().collect();
+        let labels: Vec<Label> = proj.labels.iter().filter(|l| self.sel_label.contains(&l.id)).cloned().collect();
+        if comps.is_empty() && labels.is_empty() {
+            return false;
+        }
+        let inside = |pin: Option<(u64, usize)>| pin.map_or(true, |(c, _)| self.sel.contains(&c));
+        let wires: Vec<Wire> = proj
+            .wires
+            .iter()
+            .filter(|w| {
+                self.sel_wire.contains(&w.id)
+                    || (w.start_pin.is_some() && w.end_pin.is_some() && inside(w.start_pin) && inside(w.end_pin))
+            })
+            .cloned()
+            .collect();
+        let n = (comps.len() + labels.len()).max(1) as f32;
+        let (sx, sy) = comps.iter().map(|c| (c.x, c.y)).chain(labels.iter().map(|l| (l.x, l.y))).fold((0.0, 0.0), |a, p| (a.0 + p.0, a.1 + p.1));
+        self.clip = Some(Clip { comps, wires, labels, anchor: P::new(sx / n, sy / n) });
+        true
+    }
+
+    /// Paste the copied items with their centre at `at`. New parts get fresh
+    /// reference designators; the pasted items become the selection.
+    fn paste(&mut self, proj: &mut Project, lib: &Library, at: P) -> usize {
+        let Some(clip) = self.clip.clone() else { return 0 };
+        let step = self.snap_step(proj).max(1.0);
+        let off = P::new(((at.x - clip.anchor.x) / step).round() * step, ((at.y - clip.anchor.y) / step).round() * step);
+        let mut map: HashMap<u64, u64> = HashMap::new();
+        self.clear_selection();
+        for c in &clip.comps {
+            let mut n = c.clone();
+            n.id = proj.alloc_id();
+            n.x += off.x;
+            n.y += off.y;
+            // Keep the letters the part already uses (D, R, U...), then number on.
+            let letters = c.refdes.trim_end_matches(|ch: char| ch.is_ascii_digit());
+            let prefix = if letters.is_empty() { lib.get(&c.part).map(|d| d.prefix.clone()).unwrap_or_default() } else { letters.to_string() };
+            n.refdes = proj.next_refdes(&prefix);
+            map.insert(c.id, n.id);
+            self.sel.insert(n.id);
+            proj.comps.push(n);
+        }
+        for w in &clip.wires {
+            let mut n = w.clone();
+            n.id = proj.alloc_id();
+            for p in &mut n.pts {
+                *p = p.add(off);
+            }
+            n.start_pin = w.start_pin.and_then(|(c, i)| map.get(&c).map(|&nc| (nc, i)));
+            n.end_pin = w.end_pin.and_then(|(c, i)| map.get(&c).map(|&nc| (nc, i)));
+            self.sel_wire.insert(n.id);
+            proj.wires.push(n);
+        }
+        for l in &clip.labels {
+            let mut n = l.clone();
+            n.id = proj.alloc_id();
+            n.x += off.x;
+            n.y += off.y;
+            self.sel_label.insert(n.id);
+            proj.labels.push(n);
+        }
+        proj.dirty = true;
+        clip.comps.len() + clip.labels.len()
     }
 
     fn delete_selection(&mut self, proj: &mut Project, lib: &Library) {
@@ -3030,6 +3177,15 @@ pub fn part_icon(ui: &mut egui::Ui, def: &crate::model::PartDef, lib: &Library) 
     painter.rect_filled(rect, 3.0, Color32::from_rgb(0x0C, 0x10, 0x14));
     draw_component(&painter, &v, &c, &icon_def, None, lib, None);
     response
+}
+
+/// Parts, labels and wires copied with Ctrl+C or Ctrl+X.
+#[derive(Clone)]
+struct Clip {
+    comps: Vec<Component>,
+    wires: Vec<Wire>,
+    labels: Vec<Label>,
+    anchor: P,
 }
 
 /// Mouse pointer for each schematic mode. A wire in progress and a pin under
@@ -4596,6 +4752,64 @@ mod tests {
             }
         }
         (wires, defective, counts, examples)
+    }
+
+    #[test]
+    fn mirror_flips_pins_left_to_right_and_twice_restores() {
+        let lib = Library::builtin();
+        let mut proj = crate::examples::build("NAND gate truth table", &lib).unwrap();
+        let id = proj.comps.iter().find(|c| c.refdes == "U1").unwrap().id;
+        let pin = |proj: &Project, i: usize| proj.pin_pos(&lib, id, i).unwrap();
+        let before: Vec<P> = (0..3).map(|i| pin(&proj, i)).collect();
+        let mut ids = HashSet::new();
+        ids.insert(id);
+        Schematic::mirror_components(&mut proj, &lib, &ids);
+        let c = proj.comp(id).unwrap();
+        let (cx, cy) = (c.x, c.y);
+        assert!(c.mirrored());
+        // Inputs moved from the left side to the right, output from right to left.
+        for (i, b) in before.iter().enumerate() {
+            let a = pin(&proj, i);
+            assert!((a.x - (2.0 * cx - b.x)).abs() < 0.5 && (a.y - b.y).abs() < 0.5, "pin {i}: {b:?} -> {a:?} about ({cx},{cy})");
+        }
+        Schematic::mirror_components(&mut proj, &lib, &ids);
+        for (i, b) in before.iter().enumerate() {
+            assert!(pin(&proj, i).dist(*b) < 0.5, "second mirror restores pin {i}");
+        }
+        // Rotating a mirrored part keeps it mirrored; mirroring again clears it.
+        Schematic::mirror_components(&mut proj, &lib, &ids);
+        Schematic::rotate_components(&mut proj, &lib, &ids, 90);
+        assert!(proj.comp(id).unwrap().mirrored());
+        Schematic::mirror_components(&mut proj, &lib, &ids);
+        assert!(!proj.comp(id).unwrap().mirrored());
+    }
+
+    #[test]
+    fn copy_and_paste_makes_connected_duplicates_with_new_refdes() {
+        let lib = Library::builtin();
+        let mut proj = crate::examples::build("LED with current-limiting resistor", &lib).unwrap();
+        let mut sch = Schematic::default();
+        let (n_comps, n_wires) = (proj.comps.len(), proj.wires.len());
+        for c in &proj.comps {
+            sch.sel.insert(c.id);
+        }
+        assert!(sch.copy_selection(&proj));
+        let pasted = sch.paste(&mut proj, &lib, P::new(1200.0, 900.0));
+        assert_eq!(pasted, n_comps);
+        assert_eq!(proj.comps.len(), 2 * n_comps);
+        assert_eq!(proj.wires.len(), n_wires + sch.clip.as_ref().unwrap().wires.len());
+        let mut names: Vec<&str> = proj.comps.iter().map(|c| c.refdes.as_str()).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), 2 * n_comps, "reference designators stay unique");
+        // The copy is wired up like the original but is a separate circuit.
+        let nl = proj.netlist(&lib);
+        let id_of = |proj: &Project, refdes: &str, which: usize| proj.comps.iter().filter(|c| c.refdes.starts_with(refdes)).nth(which).unwrap().id;
+        let (r_old, r_new) = (id_of(&proj, "R", 0), id_of(&proj, "R", 1));
+        let (d_old, d_new) = (id_of(&proj, "D", 0), id_of(&proj, "D", 1));
+        assert_eq!(nl.net_of(r_new, 1), nl.net_of(d_new, 0), "pasted resistor still feeds the pasted LED");
+        assert_eq!(nl.net_of(r_old, 1), nl.net_of(d_old, 0));
+        assert_ne!(nl.net_of(r_new, 1), nl.net_of(r_old, 1), "the copy does not short into the original");
     }
 
     #[test]
