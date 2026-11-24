@@ -1173,9 +1173,9 @@ impl eframe::App for AppState {
 
         let frame_dt = ui.input(|i| i.unstable_dt as f64);
         if self.pump_simulation(frame_dt) {
-            // Nothing animates between solver ticks (arrows and LED glow are
-            // static), so redraw at the 20 Hz solve rate.
-            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+            // Current arrows move, so redraw about 30 times a second. An
+            // unbounded repaint would redraw every wire on every vsync.
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
         }
 
         let typing = ctx.memory(|m| m.focused().is_some());

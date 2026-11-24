@@ -2436,15 +2436,23 @@ impl Schematic {
                 ),
             ));
             if flowing {
-                // Fixed arrowheads along the wire point the way conventional
-                // current runs. One sits at the middle of every wire; longer
-                // wires get more at an even spacing.
+                // Arrowheads travel along the wire the way conventional
+                // current runs, faster for larger currents. They move on the
+                // paint clock, not sim.t, which only advances 20 times a second.
+                let clock = p.ctx().input(|i| i.time);
                 let length = polyline_length(&pts);
                 let spacing = 60.0;
-                let count = ((length / spacing).floor() as i32).max(0) + 1;
-                let first = length * 0.5 - spacing * (count - 1) as f32 * 0.5;
+                let speed = 60.0 + (current.abs() as f32 * 3_000.0).min(90.0);
+                let mut phase = ((clock * speed as f64) % spacing as f64) as f32;
+                if current < 0.0 {
+                    phase = spacing - phase;
+                }
+                let count = ((length / spacing).ceil() as i32).max(1);
                 for k in 0..count {
-                    let at = first + spacing * k as f32;
+                    let at = phase + spacing * k as f32 - spacing * 0.5 + (w.id % 7) as f32 * 3.0;
+                    if at < 0.0 || at > length {
+                        continue;
+                    }
                     if let Some((tip_mid, mut direction)) = point_and_direction_along_polyline(&pts, at) {
                         if current < 0.0 {
                             direction = -direction;
