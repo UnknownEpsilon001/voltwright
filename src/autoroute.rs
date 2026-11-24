@@ -50,6 +50,9 @@ fn sane(v: f32) -> f32 {
     }
 }
 
+/// No clearance halo reaches further than this many cells from its copper.
+const MAX_REACH_CELLS: f32 = 64.0;
+
 /// Largest grid the router will build, in cells per layer.
 const MAX_CELLS: usize = 4_000_000;
 
@@ -100,8 +103,8 @@ impl Grid {
         if !c.x.is_finite() || !c.y.is_finite() {
             return;
         }
-        let block = sane(block);
-        let r = ((block / self.g).ceil() as usize + 1).min(self.cols + self.rows);
+        let block = sane(block).min(self.g * MAX_REACH_CELLS);
+        let r = (block / self.g).ceil() as usize + 1;
         let (cx, cy) = self.nearest(c);
         for y in cy.saturating_sub(r)..=(cy + r).min(self.rows - 1) {
             for x in cx.saturating_sub(r)..=(cx + r).min(self.cols - 1) {
@@ -121,16 +124,34 @@ impl Grid {
             }
         }
     }
+    /// Mark the cells near a track: scan only the cells inside the track's
+    /// bounding box grown by `block`, clipped to the grid, so the work is
+    /// bounded by the grid size however long the track is.
     fn stamp_segment(&mut self, layer: usize, a: P, b: P, block: f32, net: u16) {
         if !a.x.is_finite() || !a.y.is_finite() || !b.x.is_finite() || !b.y.is_finite() {
             return;
         }
-        let len = a.dist(b);
-        let steps = ((len / (self.g * 0.5)).ceil().max(1.0) as usize).min(2 * (self.cols + self.rows));
-        for s in 0..=steps {
-            let t = s as f32 / steps as f32;
-            let p = P::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
-            self.stamp_disc(&[layer], p, block, net);
+        let block = sane(block).min(self.g * MAX_REACH_CELLS);
+        let cell = |v: f32, origin: f32, max: usize| (((v - origin) / self.g).floor().clamp(0.0, max as f32 - 1.0)) as usize;
+        let reach = block + self.g;
+        let x0 = cell(a.x.min(b.x) - reach, self.origin.x, self.cols);
+        let x1 = cell(a.x.max(b.x) + reach, self.origin.x, self.cols);
+        let y0 = cell(a.y.min(b.y) - reach, self.origin.y, self.rows);
+        let y1 = cell(a.y.max(b.y) + reach, self.origin.y, self.rows);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let d = crate::model::point_seg_dist(self.centre(x, y), a, b);
+                let i = self.idx(x, y);
+                if d < self.g * 0.5 {
+                    if self.occ[layer][i] == FREE || self.occ[layer][i] == net {
+                        self.occ[layer][i] = net;
+                    } else {
+                        self.occ[layer][i] = MULTI;
+                    }
+                } else if d < block {
+                    self.claim_halo(layer, i, net);
+                }
+            }
         }
     }
 }
