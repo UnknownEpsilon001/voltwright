@@ -30,3 +30,22 @@ pub fn lerp(a: Pos2, b: Pos2, t: f32) -> Pos2 {
 pub fn vec_len(v: Vec2) -> f32 {
     (v.x * v.x + v.y * v.y).sqrt()
 }
+
+/// A value with an SI prefix and unit, such as "12.5 mA".
+pub fn si(v: f64, unit: &str) -> String {
+    let a = v.abs();
+    let (scale, prefix) = if a >= 1e6 {
+        (1e-6, "M")
+    } else if a >= 1e3 {
+        (1e-3, "k")
+    } else if a >= 1.0 || a == 0.0 {
+        (1.0, "")
+    } else if a >= 1e-3 {
+        (1e3, "m")
+    } else if a >= 1e-6 {
+        (1e6, "u")
+    } else {
+        (1e9, "n")
+    };
+    format!("{:.3} {}{}", v * scale, prefix, unit)
+}

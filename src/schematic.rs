@@ -429,6 +429,14 @@ impl Schematic {
                 }
                 continue;
             }
+            if def.symbol == Symbol::Scope {
+                // The pins sit on one edge; the body lies to their right.
+                let corners = [c.pos().add(P::new(-58.0, -95.0).rot(c.rot)), c.pos().add(P::new(70.0, 95.0).rot(c.rot))];
+                if let Some(r) = bbox_of(&corners, 0.0) {
+                    out.push(r);
+                }
+                continue;
+            }
             let Some(base) = bbox_of(&pins, 0.0) else {
                 continue;
             };
@@ -3076,9 +3084,17 @@ fn lead_reach(symbol: Symbol) -> Option<(f32, f32)> {
         Symbol::Lamp | Symbol::Motor | Symbol::Speaker | Symbol::Source => (34.0, 34.0),
         Symbol::Switch | Symbol::Button => (34.0, 34.0),
         Symbol::Xtal => (16.0, 16.0),
+        Symbol::Meter => (30.0, 30.0),
         _ => return None,
     })
 }
+
+pub const SCOPE_COLORS: [Color32; 4] = [
+    Color32::from_rgb(0xFF, 0xE0, 0x40),
+    Color32::from_rgb(0x40, 0xE0, 0xFF),
+    Color32::from_rgb(0xFF, 0x60, 0xE0),
+    Color32::from_rgb(0x60, 0xFF, 0x60),
+];
 
 fn draw_component(
     p: &egui::Painter,
@@ -3626,6 +3642,60 @@ fn draw_component(
                     );
                 }
             }
+        }
+        Symbol::Meter => {
+            let amps = def.id == "AMMETER";
+            let r = 30.0;
+            let circ = Rect::from_two_pos(s(P::new(-r, -r)), s(P::new(r, r)));
+            p.circle_stroke(circ.center(), circ.width() * 0.5, Stroke::new(thin, ink));
+            p.text(
+                circ.center(),
+                egui::Align2::CENTER_CENTER,
+                if amps { "A" } else { "V" },
+                FontId::new(24.0 * v.zoom.max(0.5), FontFamily::Proportional),
+                ink,
+            );
+            let reading = sim.filter(|sm| sm.running).and_then(|sm| {
+                let el = sm.element(&c.refdes)?;
+                Some(if amps {
+                    crate::util::si(sm.current_of(el), "A")
+                } else {
+                    crate::util::si(sm.element_voltage(el), "V")
+                })
+            });
+            let (text, color) = match reading {
+                Some(t) => (t, Color32::from_rgb(0x35, 0xF0, 0x68)),
+                None => ("---".to_string(), Color32::from_rgb(0x90, 0x98, 0x90)),
+            };
+            let at = s(P::new(0.0, 40.0));
+            let w = (text.len() as f32 * 9.0 + 10.0) * v.zoom.max(0.5);
+            let h = 20.0 * v.zoom.max(0.5);
+            let bx = Rect::from_min_size(Pos2::new(at.x - w * 0.5, at.y), Vec2::new(w, h));
+            p.rect_filled(bx, 3.0, Color32::from_rgb(0x08, 0x10, 0x0A));
+            p.text(bx.center(), egui::Align2::CENTER_CENTER, text, FontId::new(14.0 * v.zoom.max(0.5), FontFamily::Monospace), color);
+        }
+        Symbol::Scope => {
+            let body = Rect::from_two_pos(s(P::new(-60.0, -95.0)), s(P::new(70.0, 95.0)));
+            rect(p, body, None, ink, 1.8);
+            let screen = Rect::from_two_pos(s(P::new(-44.0, -80.0)), s(P::new(64.0, 30.0)));
+            p.rect_filled(screen, 2.0, Color32::from_rgb(0x06, 0x14, 0x0C));
+            let mut wave = Vec::new();
+            for i in 0..=24 {
+                let x = -40.0 + 100.0 * i as f32 / 24.0;
+                wave.push(s(P::new(x, -25.0 + 20.0 * (i as f32 * 0.9).sin())));
+            }
+            p.add(Shape::line(wave, Stroke::new(1.4, Color32::from_rgb(0xFF, 0xE0, 0x40))));
+            for (i, pd) in def.pins.iter().enumerate() {
+                line(p, s(pd.pos), s(P::new(-60.0, pd.pos.y)), ink, thin);
+                p.text(
+                    s(P::new(-52.0, pd.pos.y)),
+                    egui::Align2::LEFT_CENTER,
+                    pd.name.clone(),
+                    FontId::new(12.0 * v.zoom.max(0.5), FontFamily::Proportional),
+                    SCOPE_COLORS[i % 4],
+                );
+            }
+            p.text(s(P::new(5.0, 62.0)), egui::Align2::CENTER_CENTER, "OSC", FontId::new(13.0, FontFamily::Proportional), ink);
         }
         Symbol::Probe => {
             let tip = s(P::new(0.0, -30.0));

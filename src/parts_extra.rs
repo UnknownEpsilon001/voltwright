@@ -112,6 +112,21 @@ fn transistor(
 }
 
 pub fn add_all(p: &mut Vec<PartDef>) {
+    // ---- Instruments ----------------------------------------------------
+    for (id, name) in [("VOLTMETER", "DC VOLTMETER"), ("AMMETER", "DC AMMETER")] {
+        add(p, two_pin(id, name, "Instruments", "DEVICE", "NONE", Symbol::Meter, SimKind::R, "", "PM"));
+    }
+    add(p, two_pin("SIGGEN", "SIGNAL GENERATOR", "Instruments", "SOURCE", "NONE", Symbol::Source, SimKind::V, "SINE(0 2 1k)", "SG"));
+    {
+        let mut o = two_pin("SCOPE", "OSCILLOSCOPE", "Instruments", "DEVICE", "NONE", Symbol::Scope, SimKind::None, "", "OSC");
+        o.pins = ["A", "B", "C", "D"]
+            .iter()
+            .enumerate()
+            .map(|(i, n)| PinDef { name: (*n).into(), pos: P::new(-90.0, -75.0 + 50.0 * i as f32), dir: 180 })
+            .collect();
+        add(p, o);
+    }
+
     // ---- Logic gates (simulated, 5 V logic, no supply pins) ------------
     for (id, name) in [
         ("AND2", "2-INPUT AND GATE"),

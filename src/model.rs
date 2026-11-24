@@ -94,6 +94,8 @@ pub enum Symbol {
     Pmos,
     OpAmp,
     Gate,
+    Meter,
+    Scope,
     Ground,
     Rail,
     Switch,

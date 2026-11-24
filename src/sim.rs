@@ -241,8 +241,19 @@ impl El {
     }
 }
 
+/// A recorded voltage for the oscilloscope: (time, volts) samples of one net.
+#[derive(Clone)]
+pub struct Trace {
+    pub label: String,
+    pub node: usize,
+    pub pts: Vec<(f64, f32)>,
+}
+
+const TRACE_LIMIT: usize = 8000;
+
 #[derive(Clone)]
 pub struct Simulator {
+    pub traces: Vec<Trace>,
     pub els: Vec<El>,
     pub nodes: usize,
     pub names: Vec<String>,
@@ -261,10 +272,22 @@ impl Simulator {
         let nl = proj.netlist(lib);
         let mut els: Vec<El> = Vec::new();
 
+        let mut traces: Vec<Trace> = Vec::new();
         for c in &proj.comps {
             let Some(def) = lib.get(&c.part) else {
                 continue;
             };
+            if def.symbol == Symbol::Scope {
+                for (i, pd) in def.pins.iter().enumerate() {
+                    if let Some(net) = nl.net_of(c.id, i) {
+                        let node = node_index(&nl, net);
+                        if node != 0 {
+                            traces.push(Trace { label: format!("{} {}", c.refdes, pd.name), node, pts: Vec::new() });
+                        }
+                    }
+                }
+                continue;
+            }
             let is_lamp = def.symbol == Symbol::Lamp;
             if def.sim == SimKind::None && !is_lamp {
                 continue;
@@ -301,6 +324,11 @@ impl Simulator {
                 Kind::V { wave } => wave.offset(),
                 Kind::I { wave } => wave.offset(),
                 _ => raw,
+            };
+            let value = match def.id.as_str() {
+                "VOLTMETER" => 1.0e7,
+                "AMMETER" => 1.0e-3,
+                _ => value,
             };
             let gain = match def.sim {
                 SimKind::Npn | SimKind::Pnp => 100.0,
@@ -398,7 +426,11 @@ impl Simulator {
             })
             .collect();
 
+        // Channels that are not wired to anything have nothing to show.
+        traces.retain(|t| els.iter().any(|e| e.pins.contains(&t.node)));
+
         Ok(Simulator {
+            traces,
             els,
             nodes,
             names,
@@ -647,15 +679,39 @@ impl Simulator {
     pub fn step(&mut self, dt: f64) -> Result<(), String> {
         // A timer switches on voltage thresholds, so advance in small sub-steps
         // to keep the blink period close to the real one.
-        if self.els.iter().any(|e| matches!(e.kind, Kind::Timer | Kind::Logic(_))) {
-            let n = ((dt / 0.002).ceil() as usize).clamp(1, 60);
-            for _ in 0..n {
-                self.step_once(dt / n as f64)?;
+        let digital = self.els.iter().any(|e| matches!(e.kind, Kind::Timer | Kind::Logic(_)));
+        let mut n = if digital { (dt / 0.002).ceil() as usize } else { 1 };
+        if !self.traces.is_empty() {
+            // Take about 40 samples per cycle of the fastest source.
+            let fmax = self
+                .els
+                .iter()
+                .filter_map(|e| match &e.kind {
+                    Kind::V { wave } | Kind::I { wave } => Some(wave.frequency()),
+                    _ => None,
+                })
+                .fold(1.0f64, f64::max);
+            n = n.max((dt * 40.0 * fmax).ceil() as usize);
+        }
+        let n = n.clamp(1, 400);
+        for _ in 0..n {
+            self.step_once(dt / n as f64)?;
+            if digital {
                 self.update_timers();
             }
-            return Ok(());
+            self.record_traces();
         }
-        self.step_once(dt)
+        Ok(())
+    }
+
+    fn record_traces(&mut self) {
+        for tr in &mut self.traces {
+            let v = self.v.get(tr.node).copied().unwrap_or(0.0) as f32;
+            tr.pts.push((self.t, v));
+            if tr.pts.len() > TRACE_LIMIT {
+                tr.pts.drain(..TRACE_LIMIT / 4);
+            }
+        }
     }
 
     /// Move each 555's output latch according to its comparators: a trigger

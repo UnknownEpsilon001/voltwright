@@ -11,6 +11,7 @@ mod parts_extra;
 mod pdsprj;
 mod pcb;
 mod schematic;
+mod scope;
 mod sim;
 mod theme;
 mod toolicons;
@@ -93,6 +94,7 @@ struct AppState {
     lib: model::Library,
     proj: model::Project,
     sim: Option<sim::Simulator>,
+    scope: scope::ScopeState,
     schematic: schematic::Schematic,
     pcb: pcb::Pcb,
     panels: panels::Panels,
@@ -147,6 +149,7 @@ impl AppState {
             show_status: true,
             label_text: "NET".into(),
             probe_text: "PROBE".into(),
+            scope: scope::ScopeState::default(),
             status: "Ready. Place parts from the library panel or open a project.".into(),
             sim_error: String::new(),
             sim_stop: 0.01,
@@ -375,6 +378,9 @@ impl AppState {
 
     fn start_simulation(&mut self) {
         self.rebuild_sim();
+        if self.sim.as_ref().is_some_and(|s| !s.traces.is_empty()) {
+            self.scope.open = true;
+        }
         if let Some(sim) = self.sim.as_mut() {
             sim.running = true;
             self.sim_accumulator = 0.0;
@@ -606,6 +612,9 @@ impl AppState {
         ui.menu_button("Tools", |ui| {
             if ui.button("Simulation").clicked() {
                 self.set_tab(Tab::Simulation);
+            }
+            if ui.button("Oscilloscope").clicked() {
+                self.scope.open = true;
             }
             if ui.button("Property Assignment...   A").clicked() {
                 self.dialogs
@@ -1425,6 +1434,7 @@ impl eframe::App for AppState {
                 });
             });
 
+        scope::show(&ctx, &mut self.scope, self.sim.as_ref());
         if let Some(pid) = self.dialogs.pick_selected.take() {
             self.schematic.pending = Some(pid.clone());
             self.schematic.tool = schematic::Tool::Part;

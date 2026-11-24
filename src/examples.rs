@@ -312,6 +312,53 @@ const EXAMPLES: &[Example] = &[
         ],
     },
     Example {
+        name: "Voltmeter and ammeter",
+        notes: "A 9 V battery drives R1 (1k) and R2 (2k) in series. The ammeter \
+                sits in the loop and reads 3 mA; the voltmeter across R2 reads \
+                6 V. Meters show readings while the simulation runs.",
+        parts: &[
+            part("BATTERY", "B1", "9V", -250.0, 0.0, 90),
+            part("AMMETER", "AM1", "", -50.0, -150.0, 0),
+            part("RESISTOR", "R1", "1k", 150.0, -60.0, 90),
+            part("RESISTOR", "R2", "2k", 150.0, 120.0, 90),
+            part("VOLTMETER", "VM1", "", 300.0, 120.0, 90),
+            part("GND", "GND1", "0V", -250.0, 200.0, 0),
+            part("GND", "GND2", "0V", 150.0, 260.0, 0),
+        ],
+        nets: &[
+            &[("B1", 0), ("AM1", 0)],
+            &[("AM1", 1), ("R1", 0)],
+            &[("R1", 1), ("R2", 0)],
+            &[("R1", 1), ("VM1", 0)],
+            &[("R2", 1), ("VM1", 1)],
+            &[("R2", 1), ("GND2", 0)],
+            &[("B1", 1), ("GND1", 0)],
+        ],
+    },
+    Example {
+        name: "Oscilloscope on an RC filter",
+        notes: "A 1 kHz sine goes through R1 and C1. Scope channel A watches \
+                the input and channel B the output, which is smaller and \
+                delayed. The oscilloscope window opens when you run the \
+                simulation; change time/div and volts/div there.",
+        parts: &[
+            part("SIGGEN", "G1", "SINE(0 2 1k)", -300.0, 60.0, 90),
+            part("RESISTOR", "R1", "1k", -100.0, 0.0, 0),
+            part("CAP", "C1", "220n", 100.0, 60.0, 90),
+            part("GND", "GND1", "0V", -300.0, 200.0, 0),
+            part("GND", "GND2", "0V", 100.0, 200.0, 0),
+            part("SCOPE", "OSC1", "", 350.0, 60.0, 0),
+        ],
+        nets: &[
+            &[("G1", 0), ("R1", 0)],
+            &[("G1", 0), ("OSC1", 0)],
+            &[("R1", 1), ("C1", 0)],
+            &[("C1", 0), ("OSC1", 1)],
+            &[("C1", 1), ("GND2", 0)],
+            &[("G1", 1), ("GND1", 0)],
+        ],
+    },
+    Example {
         name: "Op-amp voltage follower",
         notes: "The output is wired straight back to the inverting input, so \
                 U1 copies the 2 V input with unity gain and can drive the \
@@ -515,6 +562,33 @@ mod tests {
         assert!(at(3.0), "Q is held between pulses");
         assert!(!at(4.3), "R pulse clears Q");
         assert!(!at(5.5), "Q stays low");
+    }
+
+    #[test]
+    fn meters_read_the_loop() {
+        let lib = Library::builtin();
+        let proj = build("Voltmeter and ammeter", &lib).unwrap();
+        let mut sim = Simulator::from_project(&proj, &lib).unwrap();
+        sim.solve_dc().unwrap();
+        let a = sim.current_of(sim.element("AM1").unwrap());
+        let v = sim.element_voltage(sim.element("VM1").unwrap());
+        assert!((a.abs() - 0.003).abs() < 1e-4, "ammeter {a}");
+        assert!((v.abs() - 6.0).abs() < 0.05, "voltmeter {v}");
+    }
+
+    #[test]
+    fn scope_records_input_and_smaller_output() {
+        let lib = Library::builtin();
+        let proj = build("Oscilloscope on an RC filter", &lib).unwrap();
+        let mut sim = Simulator::from_project(&proj, &lib).unwrap();
+        sim.solve_dc().unwrap();
+        for _ in 0..10 {
+            sim.step(0.05).unwrap();
+        }
+        assert_eq!(sim.traces.len(), 2);
+        let peak = |i: usize| sim.traces[i].pts.iter().rev().take(400).map(|s| s.1.abs()).fold(0.0f32, f32::max);
+        assert!((peak(0) - 2.0).abs() < 0.1, "input peak {}", peak(0));
+        assert!(peak(1) > 0.8 && peak(1) < 1.8, "output peak {}", peak(1));
     }
 
     #[test]
