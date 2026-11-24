@@ -32,7 +32,7 @@ It is early work. Expect rough edges and file-format changes.
   divider, transistor switch, RC charging, op-amp amplifier, diode
   rectifier, 555 timer LED blinker, op-amp voltage follower, RC low-pass
   filter, and logic gate circuits (NAND truth table, AND/OR/XOR, half adder,
-  SR latch, D flip-flop divider), plus a smoothing rectifier, inverting amplifier, series RLC
+  SR latch, D flip-flop divider, clickable logic inputs), plus a smoothing rectifier, inverting amplifier, series RLC
   resonance and common-emitter amplifier. AND, OR, XOR, NAND, NOR, XNOR, NOT and buffer gates are simulated
   as 5 V logic.
 - CNC export (File > Export): G-code for GRBL-style routers in millimetres -

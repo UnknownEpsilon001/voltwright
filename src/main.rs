@@ -477,6 +477,8 @@ impl AppState {
             for element in &current.els {
                 if let sim::Kind::Sw { on } = &element.kind {
                     stepped.set_switch(&element.refdes, *on);
+                } else if element.toggle {
+                    stepped.set_switch(&element.refdes, current.switch_state(&element.refdes));
                 }
             }
         }

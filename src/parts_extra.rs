@@ -119,6 +119,13 @@ pub fn add_all(p: &mut Vec<PartDef>) {
         add(p, ff);
     }
 
+    // ---- Clickable logic input: 0 V or 5 V, toggled by clicking it -------
+    {
+        let mut ls = two_pin("LOGICSTATE", "LOGIC STATE (CLICK TO TOGGLE)", "Logic Gates", "DEVICE", "NONE", Symbol::LogicIn, SimKind::V, "0V", "LS");
+        ls.pins = vec![PinDef { name: "OUT".into(), pos: P::new(60.0, 0.0), dir: 0 }];
+        add(p, ls);
+    }
+
     // ---- Instruments ----------------------------------------------------
     for (id, name) in [("VOLTMETER", "DC VOLTMETER"), ("AMMETER", "DC AMMETER")] {
         add(p, two_pin(id, name, "Instruments", "DEVICE", "NONE", Symbol::Meter, SimKind::R, "", "PM"));

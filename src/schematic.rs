@@ -423,6 +423,7 @@ impl Schematic {
                 let body = match def.symbol {
                     Symbol::Ground => Some((P::new(-34.0, 4.0), P::new(34.0, 46.0))),
                     Symbol::Rail => Some((P::new(-14.0, -58.0), P::new(14.0, -4.0))),
+                    Symbol::LogicIn => Some((P::new(-50.0, -22.0), P::new(42.0, 22.0))),
                     _ => None,
                 };
                 if let Some((lo, hi)) = body {
@@ -1763,7 +1764,7 @@ impl Schematic {
                                         .comp(id)
                                         .and_then(|c| lib.get(&c.part))
                                         .map(|d| {
-                                            matches!(d.symbol, Symbol::Switch | Symbol::Button)
+                                            matches!(d.symbol, Symbol::Switch | Symbol::Button | Symbol::LogicIn)
                                         })
                                         .unwrap_or(false);
                                     if is_switch {
@@ -1779,6 +1780,22 @@ impl Schematic {
                                                 sm.set_switch(&rd, next);
                                             }
                                             self.switch_overrides.insert(rd.clone(), next);
+                                            // A logic input keeps its level in the part's value,
+                                            // so it survives restarting the simulation.
+                                            let is_logic = proj
+                                                .comp(id)
+                                                .and_then(|c| lib.get(&c.part))
+                                                .is_some_and(|d| d.symbol == Symbol::LogicIn);
+                                            if is_logic {
+                                                if let Some(c) = proj.comp_mut(id) {
+                                                    let text = if next { "5V" } else { "0V" };
+                                                    c.value = text.to_string();
+                                                    if let Some(pv) = c.props.iter_mut().find(|(k, _)| k == "VALUE") {
+                                                        pv.1 = text.to_string();
+                                                    }
+                                                    proj.dirty = true;
+                                                }
+                                            }
                                             self.hint = format!(
                                                 "{rd} -> {}",
                                                 if next { "closed" } else { "open" }
@@ -3073,6 +3090,7 @@ fn symbol_extent(def: &crate::model::PartDef) -> Option<(P, P)> {
         Symbol::Gate => (-90.0, -50.0, 90.0, 50.0),
         Symbol::Scope => (-90.0, -95.0, 70.0, 95.0),
         Symbol::Tap => (-60.0, -24.0, 70.0, 24.0),
+        Symbol::LogicIn => (-52.0, -24.0, 62.0, 24.0),
         _ => return None,
     };
     Some((P::new(x0, y0), P::new(x1, y1)))
@@ -3695,6 +3713,25 @@ fn draw_component(
             p.rect_filled(bx, 3.0, Color32::from_rgb(0x08, 0x10, 0x0A));
             p.text(bx.center(), egui::Align2::CENTER_CENTER, text, FontId::new(14.0 * v.zoom.max(0.5), FontFamily::Monospace), color);
         }
+        Symbol::LogicIn => {
+            // A box that shows the level it drives; click it to flip it.
+            let high = sim
+                .map(|sm| sm.switch_state(&c.refdes))
+                .or(switch_override)
+                .unwrap_or_else(|| crate::model::parse_value(&c.value).unwrap_or(0.0) > 2.5);
+            let color = if high { Color32::from_rgb(0xFF, 0x50, 0x40) } else { Color32::from_rgb(0x50, 0x90, 0xFF) };
+            let body = Rect::from_two_pos(s(P::new(-50.0, -20.0)), s(P::new(42.0, 20.0)));
+            line(p, s(P::new(42.0, 0.0)), s(P::new(60.0, 0.0)), ink, thin);
+            p.rect_filled(body, 3.0, Color32::from_rgb(0x10, 0x16, 0x1C));
+            rect(p, body, None, color, 1.8);
+            p.text(
+                body.center(),
+                egui::Align2::CENTER_CENTER,
+                if high { "1" } else { "0" },
+                FontId::new(26.0 * v.zoom.max(0.5), FontFamily::Monospace),
+                color,
+            );
+        }
         Symbol::Tap => {
             let counter = def.id == "COUNTER";
             let body = Rect::from_two_pos(s(P::new(-40.0, -22.0)), s(P::new(70.0, 22.0)));
@@ -3921,7 +3958,7 @@ fn draw_component(
                 Color32::from_rgb(0xE8, 0xE8, 0xE8),
             );
         }
-        if show_text && !hidden("VALUE") && !c.value.is_empty() && def.symbol != Symbol::Ic {
+        if show_text && !hidden("VALUE") && !c.value.is_empty() && def.symbol != Symbol::Ic && def.symbol != Symbol::LogicIn {
             p.text(
                 at + Vec2::new(0.0, 2.0),
                 egui::Align2::LEFT_TOP,
@@ -3947,7 +3984,7 @@ fn draw_component(
             Color32::from_rgb(0xE8, 0xE8, 0xE8),
         );
     }
-    if show_text && !hidden("VALUE") && !c.value.is_empty() && def.symbol != Symbol::Ic {
+    if show_text && !hidden("VALUE") && !c.value.is_empty() && def.symbol != Symbol::Ic && def.symbol != Symbol::LogicIn {
         let anchor = s(P::new(0.0, if def.symbol == Symbol::OpAmp { 118.0 } else { 70.0 }));
         p.text(
             anchor,

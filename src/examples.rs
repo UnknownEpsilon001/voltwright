@@ -511,6 +511,34 @@ const EXAMPLES: &[Example] = &[
         ],
     },
     Example {
+        name: "Logic inputs you can click",
+        notes: "Click the 0 / 1 boxes to flip the inputs while the simulation                 runs. The XOR gate lights D1 when exactly one input is 1, and                 the AND gate lights D2 only when both are.",
+        parts: &[
+            part("LOGICSTATE", "LS1", "0V", -300.0, -50.0, 0),
+            part("LOGICSTATE", "LS2", "0V", -300.0, 50.0, 0),
+            part("XOR2", "U1", "XOR2", 0.0, -100.0, 0),
+            part("AND2", "U2", "AND2", 0.0, 150.0, 0),
+            part("RESISTOR", "R1", "330R", 250.0, -100.0, 0),
+            part("RESISTOR", "R2", "330R", 250.0, 150.0, 0),
+            part("LED-GREEN", "D1", "XOR", 370.0, -40.0, 90),
+            part("LED-RED", "D2", "AND", 370.0, 210.0, 90),
+            part("GND", "GND1", "0V", 370.0, 80.0, 0),
+            part("GND", "GND2", "0V", 370.0, 330.0, 0),
+        ],
+        nets: &[
+            &[("LS1", 0), ("U1", 0)],
+            &[("LS1", 0), ("U2", 0)],
+            &[("LS2", 0), ("U1", 1)],
+            &[("LS2", 0), ("U2", 1)],
+            &[("U1", 2), ("R1", 0)],
+            &[("U2", 2), ("R2", 0)],
+            &[("R1", 1), ("D1", 0)],
+            &[("R2", 1), ("D2", 0)],
+            &[("D1", 1), ("GND1", 0)],
+            &[("D2", 1), ("GND2", 0)],
+        ],
+    },
+    Example {
         name: "Op-amp voltage follower",
         notes: "The output is wired straight back to the inverting input, so \
                 U1 copies the 2 V input with unity gain and can drive the \
@@ -816,6 +844,25 @@ mod tests {
         assert!(at(0.3), "first rising edge sets Q");
         assert!(!at(1.3), "second edge clears it");
         assert!(at(2.3), "third edge sets it again");
+    }
+
+    #[test]
+    fn clicking_a_logic_state_changes_the_gates() {
+        let lib = Library::builtin();
+        let proj = build("Logic inputs you can click", &lib).unwrap();
+        let mut sim = Simulator::from_project(&proj, &lib).unwrap();
+        sim.solve_dc().unwrap();
+        let lit = |sim: &mut Simulator, d: &str| {
+            for _ in 0..4 {
+                sim.step(0.05).unwrap();
+            }
+            sim.led_level(d) > 0.05
+        };
+        assert!(!lit(&mut sim, "D1") && !lit(&mut sim, "D2"), "0,0 lights nothing");
+        sim.set_switch("LS1", true);
+        assert!(lit(&mut sim, "D1") && !lit(&mut sim, "D2"), "1,0 lights XOR only");
+        sim.set_switch("LS2", true);
+        assert!(!lit(&mut sim, "D1") && lit(&mut sim, "D2"), "1,1 lights AND only");
     }
 
     #[test]

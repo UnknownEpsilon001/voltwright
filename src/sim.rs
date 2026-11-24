@@ -235,6 +235,8 @@ pub struct El {
     pub latched: bool,
     /// Previous clock level of an edge-triggered part.
     pub aux: bool,
+    /// A source the user flips by clicking it (the logic state part).
+    pub toggle: bool,
 }
 
 impl El {
@@ -410,6 +412,7 @@ impl Simulator {
                 fault: None,
                 latched: true,
                 aux: false,
+                toggle: def.symbol == Symbol::LogicIn,
             });
         }
 
@@ -441,6 +444,7 @@ impl Simulator {
                         fault: None,
                         latched: true,
                         aux: false,
+                        toggle: false,
                     });
                 }
             }
@@ -506,13 +510,22 @@ impl Simulator {
                 if let Kind::Sw { on: o } = &mut e.kind {
                     *o = on;
                 }
+                if e.toggle {
+                    let level = if on { 5.0 } else { 0.0 };
+                    e.kind = Kind::V { wave: Wave::Dc(level) };
+                    e.value = level;
+                }
             }
         }
     }
 
     pub fn switch_state(&self, refdes: &str) -> bool {
         self.element(refdes)
-            .map(|e| matches!(&e.kind, Kind::Sw { on: true }))
+            .map(|e| match &e.kind {
+                Kind::Sw { on } => *on,
+                Kind::V { wave } if e.toggle => wave.offset() > 2.5,
+                _ => false,
+            })
             .unwrap_or(false)
     }
 

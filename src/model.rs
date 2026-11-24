@@ -97,6 +97,7 @@ pub enum Symbol {
     Meter,
     Scope,
     Tap,
+    LogicIn,
     Ground,
     Rail,
     Switch,
