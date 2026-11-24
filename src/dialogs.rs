@@ -227,6 +227,7 @@ pub struct Dialogs {
     pub open_path: String,
     pub save_path: String,
     pub export_dir: String,
+    pub gcode: crate::gcode::GcodeParams,
     pub message: String,
     /// Search text and result for the P-key Pick Devices dialog.
     pub pick_search: String,
@@ -266,6 +267,7 @@ impl Default for Dialogs {
             open_path: ui_text::NEW_PROJECT_FILENAME.into(),
             save_path: ui_text::NEW_PROJECT_FILENAME.into(),
             export_dir: "exports".into(),
+            gcode: crate::gcode::GcodeParams::default(),
             message: String::new(),
             pick_search: String::new(),
             pick_selected: None,
@@ -592,6 +594,32 @@ impl Dialogs {
                             self.message = result.clone().unwrap_or_default();
                         }
                     });
+                    ui.add_space(6.0);
+                    ui.strong("CNC G-code (mm, GRBL style)");
+                    egui::Grid::new("gcode_params").num_columns(4).show(ui, |ui| {
+                        let g = &mut self.gcode;
+                        for (label, v, unit) in [
+                            ("Isolation bit", &mut g.iso_bit, "mm"),
+                            ("Isolation depth", &mut g.iso_depth, "mm"),
+                            ("Drill depth", &mut g.drill_depth, "mm"),
+                            ("Outline bit", &mut g.outline_bit, "mm"),
+                            ("Outline depth", &mut g.outline_depth, "mm"),
+                            ("Pass depth", &mut g.outline_pass, "mm"),
+                            ("Feed", &mut g.feed, "mm/min"),
+                            ("Plunge", &mut g.plunge, "mm/min"),
+                            ("Safe Z", &mut g.safe_z, "mm"),
+                            ("Spindle", &mut g.rpm, "rpm"),
+                        ] {
+                            ui.label(label);
+                            ui.add(egui::DragValue::new(v).speed(0.05).range(0.0..=100000.0));
+                            ui.label(unit);
+                            ui.end_row();
+                        }
+                    });
+                    if ui.button("Export G-code (isolation, drill, outline)").clicked() {
+                        result = Some(export_gcode(proj, &self.export_dir, &self.gcode));
+                        self.message = result.clone().unwrap_or_default();
+                    }
                     ui.add_space(8.0);
                     if ui.button("Close").clicked() {
                         self.active = None;
@@ -1104,6 +1132,25 @@ fn export_gerber(proj: &Project, dir: &str) -> String {
                 }
             }
             format!("Wrote {n} manufacturing files to {}", p.display())
+        }
+        Err(e) => format!("Export failed: {e}"),
+    }
+}
+
+fn export_gcode(proj: &Project, dir: &str, params: &crate::gcode::GcodeParams) -> String {
+    match ensure(dir) {
+        Ok(p) => {
+            let files = [
+                ("board-isolation.nc", crate::gcode::isolation(proj, params)),
+                ("board-drill.nc", crate::gcode::drill(proj, params)),
+                ("board-outline.nc", crate::gcode::outline(proj, params)),
+            ];
+            for (name, body) in files {
+                if let Err(e) = std::fs::write(p.join(name), body) {
+                    return format!("Export failed: {e}");
+                }
+            }
+            format!("Wrote 3 G-code files to {}", p.display())
         }
         Err(e) => format!("Export failed: {e}"),
     }

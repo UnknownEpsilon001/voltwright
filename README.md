@@ -35,6 +35,10 @@ It is early work. Expect rough edges and file-format changes.
   SR latch), plus a smoothing rectifier, inverting amplifier, series RLC
   resonance and common-emitter amplifier. AND, OR, XOR, NAND, NOR, XNOR, NOT and buffer gates are simulated
   as 5 V logic.
+- CNC export (File > Export): G-code for GRBL-style routers in millimetres -
+  isolation routing around top copper, drilling with tool-change pauses, and a
+  multi-pass board outline cut. Bit sizes, depths and feeds are set in the
+  dialog. Round pads are assumed for isolation, and only the top layer is cut.
 - Instruments: voltmeter and ammeter parts with live readouts, a signal
   generator, and a frequency counter, a logic probe, and a four-channel oscilloscope with a floating trace window
   (Tools > Oscilloscope; it opens when a simulation with a scope part runs).

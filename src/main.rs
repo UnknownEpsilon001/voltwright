@@ -3,6 +3,7 @@ mod bom;
 mod dialogs;
 mod editor;
 mod examples;
+mod gcode;
 mod io;
 mod ui_text;
 mod model;
