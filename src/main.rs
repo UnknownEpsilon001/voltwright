@@ -1,4 +1,5 @@
 // LEO WAS HERE ;3
+mod autoroute;
 mod bom;
 mod dialogs;
 mod editor;
@@ -308,6 +309,55 @@ impl AppState {
             self.undo.remove(0);
         }
         self.redo.clear();
+    }
+
+    /// Route every net that is not yet joined by copper. One undo step undoes it.
+    fn autoroute_pcb(&mut self) {
+        let before = self.proj.clone();
+        let nl = self.proj.netlist(&self.lib);
+        self.proj.sync_pcb(&self.lib, &nl);
+        let res = autoroute::route(&self.proj, &autoroute::RouteParams::default());
+        if res.connections == 0 {
+            self.status = "Autoroute: nothing to route, every net is already connected.".into();
+            return;
+        }
+        let (tracks, vias) = (res.tracks.len(), res.vias.len());
+        for mut t in res.tracks {
+            t.id = self.proj.alloc_id();
+            self.proj.tracks.push(t);
+        }
+        for mut v in res.vias {
+            v.id = self.proj.alloc_id();
+            self.proj.vias.push(v);
+        }
+        self.proj.dirty = true;
+        self.push_undo(before);
+        self.drc_cache_key = u64::MAX;
+        self.status = if res.failed.is_empty() {
+            format!("Autoroute: {} of {} connections routed, {tracks} tracks, {vias} vias.", res.routed, res.connections)
+        } else {
+            format!(
+                "Autoroute: {} of {} connections routed; still open: {}. Move parts apart or add space, then run it again.",
+                res.routed,
+                res.connections,
+                res.failed.join(", ")
+            )
+        };
+    }
+
+    fn rip_up_pcb(&mut self) {
+        if self.proj.tracks.is_empty() && self.proj.vias.is_empty() {
+            self.status = "Rip up: there are no tracks.".into();
+            return;
+        }
+        let before = self.proj.clone();
+        let n = self.proj.tracks.len();
+        self.proj.tracks.clear();
+        self.proj.vias.clear();
+        self.proj.dirty = true;
+        self.push_undo(before);
+        self.drc_cache_key = u64::MAX;
+        self.status = format!("Removed {n} tracks. Undo brings them back.");
     }
 
     fn undo(&mut self) {
@@ -627,6 +677,10 @@ impl AppState {
             if ui.button("Search and Tag...   T").clicked() {
                 self.dialogs.open(Dialog::SearchTag);
             }
+            if ui.button("Autoroute PCB").clicked() {
+                self.autoroute_pcb();
+                self.set_tab(Tab::Pcb);
+            }
             if ui.button("Design Rule Check").clicked() {
                 let n = self.proj.drc().len();
                 self.status = if n == 0 {
@@ -802,6 +856,17 @@ impl AppState {
                         });
                     ui.checkbox(&mut self.pcb.show_ratsnest, "Ratsnest");
                     ui.checkbox(&mut self.pcb.show_drc, "DRC");
+                    ui.separator();
+                    if ui
+                        .button("Autoroute")
+                        .on_hover_text("Route every unconnected net on the top and bottom copper")
+                        .clicked()
+                    {
+                        self.autoroute_pcb();
+                    }
+                    if ui.button("Rip up").on_hover_text("Remove all tracks and vias").clicked() {
+                        self.rip_up_pcb();
+                    }
                 }
                 Tab::Simulation => {
                     if ui.button("Rebuild").clicked() {
@@ -1767,6 +1832,7 @@ fn main() {
     let mut shot: Option<PathBuf> = None;
     let args: Vec<String> = std::env::args().collect();
     let start_live = args.iter().any(|arg| arg == "--simulate");
+    let args_for_ui = args.clone();
     // Developer aid: --symbols lays out one of each symbol for review.
     let show_symbols = args.iter().position(|arg| arg == "--symbols").map(|i| {
         args.get(i + 1).filter(|a| !a.starts_with("--")).cloned().unwrap_or_default()
@@ -1868,6 +1934,9 @@ fn main() {
                 Some("simulation") => app.tab = Tab::Simulation,
                 Some("home") => app.tab = Tab::Home,
                 _ => {}
+            }
+            if args_for_ui.iter().any(|arg| arg == "--autoroute") {
+                app.autoroute_pcb();
             }
             if start_live {
                 app.start_simulation();

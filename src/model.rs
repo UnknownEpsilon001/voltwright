@@ -2286,11 +2286,11 @@ impl Project {
                     if pad.net.is_some() && pad.net == t.net {
                         continue;
                     }
-                    let d = point_seg_dist(pad.pos, t.a, t.b) - pad.size * 0.5 - t.width * 0.5;
+                    let d = point_seg_dist(crate::pcb::absolute_pad(f, pad), t.a, t.b) - pad.size * 0.5 - t.width * 0.5;
                     if d < r.pad_trace {
                         out.push(DrcViolation {
                             kind: "Pad-Trace".into(),
-                            pos: pad.pos,
+                            pos: crate::pcb::absolute_pad(f, pad),
                             detail: format!(
                                 "{} pad, {:.1} th gap, rule {:.0} th",
                                 f.refdes, d, r.pad_trace

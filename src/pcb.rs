@@ -693,30 +693,16 @@ impl Pcb {
     }
 
     fn draw_ratsnest(&self, painter: &egui::Painter, proj: &Project, scr: &impl Fn(P) -> Pos2) {
-        use std::collections::HashMap;
-        let mut by_net: HashMap<String, Vec<P>> = HashMap::new();
-        for f in &proj.fps {
-            for pad in &f.pads {
-                if let Some(n) = &pad.net {
-                    by_net
-                        .entry(n.clone())
-                        .or_default()
-                        .push(absolute_pad(f, pad));
-                }
-            }
-        }
-        let mut shapes = Vec::new();
-        for (_, pts) in by_net {
-            if pts.len() < 2 {
-                continue;
-            }
-            for w in pts.windows(2) {
-                shapes.push(Shape::line(
-                    vec![scr(w[0]), scr(w[1])],
+        // Only connections that copper does not yet make.
+        let shapes: Vec<Shape> = crate::autoroute::open_links(proj)
+            .into_iter()
+            .map(|(a, b)| {
+                Shape::line(
+                    vec![scr(a), scr(b)],
                     Stroke::new(1.0, Color32::from_rgba_premultiplied(120, 200, 120, 90)),
-                ));
-            }
-        }
+                )
+            })
+            .collect();
         painter.add(Shape::Vec(shapes));
     }
 
