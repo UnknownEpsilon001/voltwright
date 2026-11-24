@@ -35,7 +35,7 @@ It is early work. Expect rough edges and file-format changes.
   SR latch). AND, OR, XOR, NAND, NOR, XNOR, NOT and buffer gates are simulated
   as 5 V logic.
 - Instruments: voltmeter and ammeter parts with live readouts, a signal
-  generator, and a four-channel oscilloscope with a floating trace window
+  generator, and a frequency counter, a logic probe, and a four-channel oscilloscope with a floating trace window
   (Tools > Oscilloscope; it opens when a simulation with a scope part runs).
 - Import of `.pdsprj` projects. Voltwright brings across the parts it has
   models for, rebuilds the nets and reroutes the wires; it lists anything it

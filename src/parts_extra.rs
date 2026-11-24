@@ -116,6 +116,11 @@ pub fn add_all(p: &mut Vec<PartDef>) {
     for (id, name) in [("VOLTMETER", "DC VOLTMETER"), ("AMMETER", "DC AMMETER")] {
         add(p, two_pin(id, name, "Instruments", "DEVICE", "NONE", Symbol::Meter, SimKind::R, "", "PM"));
     }
+    for (id, name) in [("COUNTER", "FREQUENCY COUNTER"), ("LOGICPROBE", "LOGIC PROBE")] {
+        let mut t = two_pin(id, name, "Instruments", "DEVICE", "NONE", Symbol::Tap, SimKind::None, "", "PM");
+        t.pins = vec![PinDef { name: "IN".into(), pos: P::new(-60.0, 0.0), dir: 180 }];
+        add(p, t);
+    }
     add(p, two_pin("SIGGEN", "SIGNAL GENERATOR", "Instruments", "SOURCE", "NONE", Symbol::Source, SimKind::V, "SINE(0 2 1k)", "SG"));
     {
         let mut o = two_pin("SCOPE", "OSCILLOSCOPE", "Instruments", "DEVICE", "NONE", Symbol::Scope, SimKind::None, "", "OSC");

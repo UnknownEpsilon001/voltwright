@@ -251,9 +251,33 @@ pub struct Trace {
 
 const TRACE_LIMIT: usize = 8000;
 
+/// A one-pin instrument (frequency counter or logic probe) on a net.
+#[derive(Clone)]
+pub struct Tap {
+    pub refdes: String,
+    pub node: usize,
+    pub counter: bool,
+    last: bool,
+    lo: f32,
+    hi: f32,
+    edges: Vec<f64>,
+}
+
+impl Tap {
+    /// Frequency from the last few rising edges, or 0 with fewer than two.
+    pub fn frequency(&self) -> f64 {
+        let n = self.edges.len();
+        if n < 2 {
+            return 0.0;
+        }
+        (n - 1) as f64 / (self.edges[n - 1] - self.edges[0]).max(1e-12)
+    }
+}
+
 #[derive(Clone)]
 pub struct Simulator {
     pub traces: Vec<Trace>,
+    pub taps: Vec<Tap>,
     pub els: Vec<El>,
     pub nodes: usize,
     pub names: Vec<String>,
@@ -273,10 +297,25 @@ impl Simulator {
         let mut els: Vec<El> = Vec::new();
 
         let mut traces: Vec<Trace> = Vec::new();
+        let mut taps: Vec<Tap> = Vec::new();
         for c in &proj.comps {
             let Some(def) = lib.get(&c.part) else {
                 continue;
             };
+            if def.symbol == Symbol::Tap {
+                if let Some(net) = nl.net_of(c.id, 0) {
+                    taps.push(Tap {
+                        refdes: c.refdes.clone(),
+                        node: node_index(&nl, net),
+                        counter: def.id == "COUNTER",
+                        last: false,
+                        lo: f32::MAX,
+                        hi: f32::MIN,
+                        edges: Vec::new(),
+                    });
+                }
+                continue;
+            }
             if def.symbol == Symbol::Scope {
                 for (i, pd) in def.pins.iter().enumerate() {
                     if let Some(net) = nl.net_of(c.id, i) {
@@ -431,6 +470,7 @@ impl Simulator {
 
         Ok(Simulator {
             traces,
+            taps,
             els,
             nodes,
             names,
@@ -681,7 +721,7 @@ impl Simulator {
         // to keep the blink period close to the real one.
         let digital = self.els.iter().any(|e| matches!(e.kind, Kind::Timer | Kind::Logic(_)));
         let mut n = if digital { (dt / 0.002).ceil() as usize } else { 1 };
-        if !self.traces.is_empty() {
+        if !self.traces.is_empty() || self.taps.iter().any(|t| t.counter) {
             // Take about 40 samples per cycle of the fastest source.
             let fmax = self
                 .els
@@ -704,7 +744,29 @@ impl Simulator {
         Ok(())
     }
 
+    pub fn tap(&self, refdes: &str) -> Option<&Tap> {
+        self.taps.iter().find(|t| t.refdes == refdes)
+    }
+
     fn record_traces(&mut self) {
+        let t = self.t;
+        for tap in self.taps.iter_mut().filter(|t| t.counter) {
+            let v = self.v.get(tap.node).copied().unwrap_or(0.0) as f32;
+            tap.lo = tap.lo.min(v);
+            tap.hi = tap.hi.max(v);
+            if tap.hi - tap.lo < 0.2 {
+                continue;
+            }
+            // Count rising edges through the middle of the observed swing.
+            let high = v > (tap.lo + tap.hi) * 0.5;
+            if high && !tap.last {
+                tap.edges.push(t);
+                if tap.edges.len() > 8 {
+                    tap.edges.remove(0);
+                }
+            }
+            tap.last = high;
+        }
         for tr in &mut self.traces {
             let v = self.v.get(tr.node).copied().unwrap_or(0.0) as f32;
             tr.pts.push((self.t, v));

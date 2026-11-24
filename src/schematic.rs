@@ -3674,6 +3674,33 @@ fn draw_component(
             p.rect_filled(bx, 3.0, Color32::from_rgb(0x08, 0x10, 0x0A));
             p.text(bx.center(), egui::Align2::CENTER_CENTER, text, FontId::new(14.0 * v.zoom.max(0.5), FontFamily::Monospace), color);
         }
+        Symbol::Tap => {
+            let counter = def.id == "COUNTER";
+            let body = Rect::from_two_pos(s(P::new(-40.0, -22.0)), s(P::new(70.0, 22.0)));
+            line(p, s(P::new(-60.0, 0.0)), s(P::new(-40.0, 0.0)), ink, thin);
+            rect(p, body, None, ink, 1.8);
+            let running = sim.filter(|sm| sm.running);
+            let tap = running.and_then(|sm| sm.tap(&c.refdes).map(|t| (sm, t)));
+            let (text, color) = match tap {
+                Some((sm, t)) if counter => (crate::util::si(t.frequency(), "Hz"), Color32::from_rgb(0x35, 0xF0, 0x68)),
+                Some((sm, t)) => {
+                    if sm.v.get(t.node).copied().unwrap_or(0.0) > 2.5 {
+                        ("H".to_string(), Color32::from_rgb(0xFF, 0x50, 0x40))
+                    } else {
+                        ("L".to_string(), Color32::from_rgb(0x50, 0x90, 0xFF))
+                    }
+                }
+                None => ("---".to_string(), Color32::from_rgb(0x90, 0x98, 0x90)),
+            };
+            p.rect_filled(body.shrink(2.0), 2.0, Color32::from_rgb(0x08, 0x10, 0x0A));
+            p.text(
+                body.center(),
+                egui::Align2::CENTER_CENTER,
+                text,
+                FontId::new(if counter { 13.0 } else { 18.0 } * v.zoom.max(0.5), FontFamily::Monospace),
+                color,
+            );
+        }
         Symbol::Scope => {
             let body = Rect::from_two_pos(s(P::new(-60.0, -95.0)), s(P::new(70.0, 95.0)));
             rect(p, body, None, ink, 1.8);

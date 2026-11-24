@@ -359,6 +359,23 @@ const EXAMPLES: &[Example] = &[
         ],
     },
     Example {
+        name: "Frequency counter and logic probe",
+        notes: "A 100 Hz square wave drives a frequency counter and a logic \
+                probe. The counter shows the measured frequency; the probe \
+                shows H or L and flips as the signal switches.",
+        parts: &[
+            part("SIGGEN", "G1", "PULSE(0 5 0 1u 1u 5m 10m)", -250.0, 60.0, 90),
+            part("COUNTER", "FC1", "", 150.0, -50.0, 0),
+            part("LOGICPROBE", "LP1", "", 150.0, 70.0, 0),
+            part("GND", "GND1", "0V", -250.0, 180.0, 0),
+        ],
+        nets: &[
+            &[("G1", 0), ("FC1", 0)],
+            &[("G1", 0), ("LP1", 0)],
+            &[("G1", 1), ("GND1", 0)],
+        ],
+    },
+    Example {
         name: "Op-amp voltage follower",
         notes: "The output is wired straight back to the inverting input, so \
                 U1 copies the 2 V input with unity gain and can drive the \
@@ -589,6 +606,20 @@ mod tests {
         let peak = |i: usize| sim.traces[i].pts.iter().rev().take(400).map(|s| s.1.abs()).fold(0.0f32, f32::max);
         assert!((peak(0) - 2.0).abs() < 0.1, "input peak {}", peak(0));
         assert!(peak(1) > 0.8 && peak(1) < 1.8, "output peak {}", peak(1));
+    }
+
+    #[test]
+    fn counter_measures_the_signal_frequency() {
+        let lib = Library::builtin();
+        let proj = build("Frequency counter and logic probe", &lib).unwrap();
+        let mut sim = Simulator::from_project(&proj, &lib).unwrap();
+        sim.solve_dc().unwrap();
+        for _ in 0..20 {
+            sim.step(0.05).unwrap();
+        }
+        let f = sim.tap("FC1").unwrap().frequency();
+        assert!((f - 100.0).abs() < 3.0, "counter read {f} Hz");
+        assert!(sim.tap("LP1").is_some());
     }
 
     #[test]
