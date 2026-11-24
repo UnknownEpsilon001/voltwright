@@ -721,19 +721,21 @@ impl Simulator {
         // to keep the blink period close to the real one.
         let digital = self.els.iter().any(|e| matches!(e.kind, Kind::Timer | Kind::Logic(_)));
         let mut n = if digital { (dt / 0.002).ceil() as usize } else { 1 };
-        if !self.traces.is_empty() || self.taps.iter().any(|t| t.counter) {
-            // Take about 40 samples per cycle of the fastest source.
-            let fmax = self
-                .els
-                .iter()
-                .filter_map(|e| match &e.kind {
-                    Kind::V { wave } | Kind::I { wave } => Some(wave.frequency()),
-                    _ => None,
-                })
-                .fold(1.0f64, f64::max);
+        // Take about 40 samples per cycle of the fastest source. Without
+        // this a 50 Hz sine solved every 50 ms would always be sampled at the
+        // same phase and look like a flat line.
+        let fmax = self
+            .els
+            .iter()
+            .filter_map(|e| match &e.kind {
+                Kind::V { wave } | Kind::I { wave } => Some(wave.frequency()),
+                _ => None,
+            })
+            .fold(0.0f64, f64::max);
+        if fmax > 0.0 {
             n = n.max((dt * 40.0 * fmax).ceil() as usize);
         }
-        let n = n.clamp(1, 400);
+        let n = n.clamp(1, 2000);
         for _ in 0..n {
             self.step_once(dt / n as f64)?;
             if digital {

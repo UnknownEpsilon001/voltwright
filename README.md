@@ -32,7 +32,8 @@ It is early work. Expect rough edges and file-format changes.
   divider, transistor switch, RC charging, op-amp amplifier, diode
   rectifier, 555 timer LED blinker, op-amp voltage follower, RC low-pass
   filter, and logic gate circuits (NAND truth table, AND/OR/XOR, half adder,
-  SR latch). AND, OR, XOR, NAND, NOR, XNOR, NOT and buffer gates are simulated
+  SR latch), plus a smoothing rectifier, inverting amplifier, series RLC
+  resonance and common-emitter amplifier. AND, OR, XOR, NAND, NOR, XNOR, NOT and buffer gates are simulated
   as 5 V logic.
 - Instruments: voltmeter and ammeter parts with live readouts, a signal
   generator, and a frequency counter, a logic probe, and a four-channel oscilloscope with a floating trace window

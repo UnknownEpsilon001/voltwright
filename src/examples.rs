@@ -376,6 +376,121 @@ const EXAMPLES: &[Example] = &[
         ],
     },
     Example {
+        name: "Rectifier with smoothing capacitor",
+        notes: "D1 passes the positive half of a 10 V, 50 Hz sine. C1 charges on \
+                each peak and holds the load voltage up between peaks, leaving \
+                a small ripple. A smaller C1 gives more ripple.",
+        parts: &[
+            part("SINE", "V1", "SINE(0 10 50)", -300.0, 50.0, 90),
+            part("DIODE", "D1", "1N4007", -100.0, -10.0, 0),
+            part("CPOL", "C1", "470u", 60.0, 50.0, 90),
+            part("RESISTOR", "RL", "1k", 160.0, 50.0, 90),
+            part("GND", "GND1", "0V", -300.0, 150.0, 0),
+            part("GND", "GND2", "0V", 60.0, 150.0, 0),
+            part("GND", "GND3", "0V", 160.0, 150.0, 0),
+        ],
+        nets: &[
+            &[("V1", 0), ("D1", 0)],
+            &[("D1", 1), ("C1", 0)],
+            &[("C1", 0), ("RL", 0)],
+            &[("V1", 1), ("GND1", 0)],
+            &[("C1", 1), ("GND2", 0)],
+            &[("RL", 1), ("GND3", 0)],
+        ],
+    },
+    Example {
+        name: "Inverting op-amp amplifier",
+        notes: "The gain is -R2/R1 = -2, so a 1 V input gives -2 V at the \
+                output. The inverting input is a virtual ground. This is an \
+                ideal op-amp; its supply pins are not used by the simulation.",
+        parts: &[
+            part("DCSRC", "V1", "1V", -400.0, 100.0, 90),
+            part("RESISTOR", "R1", "10k", -200.0, 40.0, 0),
+            part("OPAMP", "U1", "OPAMP", 0.0, 0.0, 0),
+            part("RESISTOR", "R2", "20k", -40.0, -140.0, 0),
+            part("RESISTOR", "RL", "10k", 250.0, 60.0, 90),
+            part("GND", "GND1", "0V", -400.0, 220.0, 0),
+            part("GND", "GND2", "0V", -150.0, -40.0, 0),
+            part("GND", "GND3", "0V", 250.0, 180.0, 0),
+        ],
+        nets: &[
+            &[("V1", 0), ("R1", 0)],
+            &[("R1", 1), ("U1", 1)],
+            &[("R1", 1), ("R2", 0)],
+            &[("R2", 1), ("U1", 2)],
+            &[("U1", 2), ("RL", 0)],
+            &[("U1", 0), ("GND2", 0)],
+            &[("V1", 1), ("GND1", 0)],
+            &[("RL", 1), ("GND3", 0)],
+        ],
+    },
+    Example {
+        name: "Series RLC resonance",
+        notes: "R1, L1 and C1 resonate at 1 / (2 x pi x sqrt(L x C)), about \
+                500 Hz. The source is at that frequency, so the voltage across \
+                C1 (scope channel B) swings several times larger than the 1 V \
+                input (channel A). Run it and open the oscilloscope.",
+        parts: &[
+            part("SIGGEN", "G1", "SINE(0 1 500)", -350.0, 60.0, 90),
+            part("RESISTOR", "R1", "4R", -150.0, 0.0, 0),
+            part("INDUCTOR", "L1", "10m", 50.0, 0.0, 0),
+            part("CAP", "C1", "10u", 250.0, 60.0, 90),
+            part("GND", "GND1", "0V", -350.0, 160.0, 0),
+            part("GND", "GND2", "0V", 250.0, 160.0, 0),
+            part("SCOPE", "OSC1", "", 500.0, 60.0, 0),
+        ],
+        nets: &[
+            &[("G1", 0), ("R1", 0)],
+            &[("G1", 0), ("OSC1", 0)],
+            &[("R1", 1), ("L1", 0)],
+            &[("L1", 1), ("C1", 0)],
+            &[("C1", 0), ("OSC1", 1)],
+            &[("G1", 1), ("GND1", 0)],
+            &[("C1", 1), ("GND2", 0)],
+        ],
+    },
+    Example {
+        name: "Common-emitter amplifier",
+        notes: "R1 and R2 bias Q1 so its collector rests near 9 V. A small 1 kHz \
+                signal reaches the base through C1 and comes out inverted and \
+                about twice as large (gain is about -RC/RE). The oscilloscope \
+                shows the collector; tick AC coupling to centre it.",
+        parts: &[
+            part("SIGGEN", "G1", "SINE(0 0.3 1k)", -500.0, 160.0, 90),
+            part("CAP", "C1", "10u", -350.0, 100.0, 0),
+            part("RESISTOR", "R1", "47k", -150.0, 20.0, 90),
+            part("RESISTOR", "R2", "10k", -150.0, 180.0, 90),
+            part("RESISTOR", "RC", "2.2k", 50.0, -80.0, 90),
+            part("2N3904", "Q1", "2N3904", 0.0, 100.0, 0),
+            part("RESISTOR", "RE", "1k", 50.0, 220.0, 90),
+            part("DCSRC", "V2", "12V", 400.0, 100.0, 90),
+            part("VCC", "VCC1", "12V", -150.0, -40.0, 0),
+            part("VCC", "VCC2", "12V", 50.0, -140.0, 0),
+            part("VCC", "VCC3", "12V", 400.0, 40.0, 0),
+            part("GND", "GND1", "0V", -500.0, 260.0, 0),
+            part("GND", "GND2", "0V", -150.0, 240.0, 0),
+            part("GND", "GND3", "0V", 50.0, 300.0, 0),
+            part("GND", "GND4", "0V", 400.0, 200.0, 0),
+            part("SCOPE", "OSC1", "", 250.0, 100.0, 0),
+        ],
+        nets: &[
+            &[("G1", 0), ("C1", 0)],
+            &[("C1", 1), ("R1", 1)],
+            &[("R1", 1), ("R2", 0)],
+            &[("R1", 1), ("Q1", 0)],
+            &[("R1", 0), ("VCC1", 0)],
+            &[("RC", 0), ("VCC2", 0)],
+            &[("RC", 1), ("Q1", 1)],
+            &[("Q1", 1), ("OSC1", 0)],
+            &[("Q1", 2), ("RE", 0)],
+            &[("V2", 0), ("VCC3", 0)],
+            &[("G1", 1), ("GND1", 0)],
+            &[("R2", 1), ("GND2", 0)],
+            &[("RE", 1), ("GND3", 0)],
+            &[("V2", 1), ("GND4", 0)],
+        ],
+    },
+    Example {
         name: "Op-amp voltage follower",
         notes: "The output is wired straight back to the inverting input, so \
                 U1 copies the 2 V input with unity gain and can drive the \
@@ -620,6 +735,50 @@ mod tests {
         let f = sim.tap("FC1").unwrap().frequency();
         assert!((f - 100.0).abs() < 3.0, "counter read {f} Hz");
         assert!(sim.tap("LP1").is_some());
+    }
+
+    fn run(name: &str, secs: f64) -> Simulator {
+        let lib = Library::builtin();
+        let proj = build(name, &lib).unwrap();
+        let mut sim = Simulator::from_project(&proj, &lib).unwrap();
+        sim.solve_dc().unwrap();
+        for _ in 0..(secs / 0.05) as usize {
+            sim.step(0.05).unwrap();
+        }
+        sim
+    }
+
+    #[test]
+    fn smoothing_capacitor_holds_the_load_up() {
+        let sim = run("Rectifier with smoothing capacitor", 1.0);
+        let rl = sim.element("RL").unwrap();
+        let v = sim.element_voltage(rl);
+        assert!(v > 8.0 && v < 10.0, "load {v} V");
+    }
+
+    #[test]
+    fn inverting_amplifier_gives_minus_two_volts() {
+        let sim = run("Inverting op-amp amplifier", 0.0);
+        let rl = sim.element("RL").unwrap();
+        let v = sim.element_voltage(rl);
+        assert!((v + 2.0).abs() < 0.1, "output {v} V");
+    }
+
+    #[test]
+    fn rlc_resonance_magnifies_the_capacitor_voltage() {
+        let sim = run("Series RLC resonance", 0.5);
+        let peak = sim.traces[1].pts.iter().rev().take(400).map(|s| s.1.abs()).fold(0.0f32, f32::max);
+        assert!(peak > 3.0, "capacitor peak {peak} V");
+    }
+
+    #[test]
+    fn common_emitter_collector_is_biased_and_swings() {
+        let sim = run("Common-emitter amplifier", 0.3);
+        let pts: Vec<f32> = sim.traces[0].pts.iter().rev().take(400).map(|s| s.1).collect();
+        let (lo, hi) = pts.iter().fold((f32::MAX, f32::MIN), |(l, h), v| (l.min(*v), h.max(*v)));
+        let mid = (lo + hi) * 0.5;
+        assert!(mid > 6.5 && mid < 11.0, "collector rests at {mid} V");
+        assert!(hi - lo > 0.6, "collector swing {} V", hi - lo);
     }
 
     #[test]

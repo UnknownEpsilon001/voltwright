@@ -10,11 +10,13 @@ pub struct ScopeState {
     pub open: bool,
     pub time_div: f64,
     pub volt_div: f64,
+    /// Remove each channel's average so a signal riding on a DC level fills the screen.
+    pub ac: bool,
 }
 
 impl Default for ScopeState {
     fn default() -> Self {
-        ScopeState { open: false, time_div: 5e-4, volt_div: 1.0 }
+        ScopeState { open: false, time_div: 5e-4, volt_div: 1.0, ac: false }
     }
 }
 
@@ -34,6 +36,7 @@ pub fn show(ctx: &egui::Context, st: &mut ScopeState, sim: Option<&Simulator>) {
             step_combo(ui, "tdiv", &mut st.time_div, &TIME_DIVS, "s");
             ui.label("Volts/div");
             step_combo(ui, "vdiv", &mut st.volt_div, &VOLT_DIVS, "V");
+            ui.checkbox(&mut st.ac, "AC coupling");
         });
         let size = Vec2::new(ui.available_width().max(200.0), (ui.available_width() * 0.7).clamp(160.0, 420.0));
         let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
@@ -88,11 +91,16 @@ pub fn show(ctx: &egui::Context, st: &mut ScopeState, sim: Option<&Simulator>) {
         }
         let vdiv = st.volt_div as f32;
         for (k, tr) in sim.traces.iter().enumerate() {
-            let pts: Vec<Pos2> = tr
-                .pts
-                .iter()
-                .filter(|s| s.0 >= start && s.0 <= start + window)
+            let shown: Vec<&(f64, f32)> = tr.pts.iter().filter(|s| s.0 >= start && s.0 <= start + window).collect();
+            let offset = if st.ac && !shown.is_empty() {
+                shown.iter().map(|s| s.1).sum::<f32>() / shown.len() as f32
+            } else {
+                0.0
+            };
+            let pts: Vec<Pos2> = shown
+                .into_iter()
                 .map(|s| {
+                    let s = &(s.0, s.1 - offset);
                     let x = rect.left() + rect.width() * ((s.0 - start) / window) as f32;
                     let y = mid - s.1 / vdiv * rect.height() / 8.0;
                     Pos2::new(x, y.clamp(rect.top(), rect.bottom()))
